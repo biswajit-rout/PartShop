@@ -29,7 +29,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-partshop_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-partshop_secret}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-partshop_secret_change_me}
       POSTGRES_DB: ${POSTGRES_DB:-partshop_db}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
@@ -44,12 +44,7 @@ services:
       - partshop-network
 
   # =========================================================================
-  # Backend Service: FastAPI Python REST API (Planned / Target)
-  # NOTE: Activated automatically when backend code is placed in ./backend.
-  # The 'profiles' flag ensures 'docker compose up' works immediately without
-  # failing before ./backend/Dockerfile is created.
-  # Run 'docker compose --profile backend up' or remove the profiles line once
-  # the backend folder is created.
+  # Backend Service: FastAPI Python REST API
   # =========================================================================
   backend:
     build:
@@ -57,16 +52,21 @@ services:
       dockerfile: Dockerfile
     container_name: partshop-backend
     restart: unless-stopped
-    profiles:
-      - backend
-      - full
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      # Maps host port 8001 to container port 8000 to prevent port 8000 conflicts
+      - "${BACKEND_PORT:-8001}:8000"
+    volumes:
+      # Live hot-reloading: edits in ./backend in VS Code reflect instantly in Docker
+      - ./backend:/app
     environment:
-      - ENVIRONMENT=production
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-partshop_user}:${POSTGRES_PASSWORD:-partshop_secret}@postgres:5432/${POSTGRES_DB:-partshop_db}
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-partshop_user}:${POSTGRES_PASSWORD:-partshop_secret_change_me}@postgres:5432/${POSTGRES_DB:-partshop_db}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-partshop_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-partshop_secret_change_me}
+      - POSTGRES_DB=${POSTGRES_DB:-partshop_db}
       - SECRET_KEY=${BACKEND_SECRET_KEY:-partshop_default_jwt_secret_key_change_in_production}
-      - ACCESS_TOKEN_EXPIRE_MINUTES=1440
     depends_on:
       postgres:
         condition: service_healthy

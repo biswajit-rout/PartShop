@@ -57,14 +57,14 @@ Copy-Item .env.example .env
 #### 3. Start the Application
 Run Docker Compose in detached mode:
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
-
-> **Note on Backend Integration**:  
-> The FastAPI backend service in `docker-compose.yml` is configured with Docker Compose profiles (`profiles: ["backend", "full"]`). This allows `docker compose up` to spin up the **Frontend** and **PostgreSQL** immediately without failing while the backend codebase is being initialized.
+*(Use `docker compose up -d --build` if you made changes to `Dockerfile` or added new packages to `requirements.txt`).*
 
 #### 4. Access the Services
 - **Frontend Web UI**: [http://localhost:3000](http://localhost:3000)
+- **Backend API & Swagger Docs**: [http://localhost:8001/docs](http://localhost:8001/docs)
+- **Backend Health Check**: [http://localhost:8001/health](http://localhost:8001/health)
 - **PostgreSQL Database**: `localhost:5432`  
   - Database: `partshop_db`  
   - User: `partshop_user`  

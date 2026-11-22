@@ -29,7 +29,7 @@ flowchart TD
     subgraph HostSystem["Host Operating System (Development / VPS / Cloud VM)"]
         HostPort3000["Host Port 3000"]
         HostPort5432["Host Port 5432"]
-        HostPort8000["Host Port 8000 (Planned)"]
+        HostPort8001["Host Port 8001"]
     end
 
     subgraph BridgeNetwork["Docker Network: partshop-network (Bridge)"]
@@ -42,33 +42,33 @@ flowchart TD
             HealthCheck["Healthcheck Process<br/>pg_isready -U partshop_user"]
         end
 
-        subgraph BackendService["Container: partshop-backend (Profile: backend/full)"]
-            FastAPICore["FastAPI Python 3.12 Server<br/>Uvicorn ASGI (Port 8000)"]
+        subgraph BackendService["Container: partshop-backend"]
+            FastAPICore["FastAPI Python 3.12 Server<br/>Uvicorn ASGI with --reload (Port 8000)"]
         end
     end
 
     subgraph PersistentVolumes["Host Storage / Docker Volumes"]
         PGVolume[("Volume: partshop-pgdata<br/>Mount: /var/lib/postgresql/data")]
+        DevMount["Bind Mount: ./backend<br/>Mount: /app (Hot-Reload)"]
     end
 
     HostPort3000 -->|Expose| NextServer
     HostPort5432 -->|Expose| PGCore
-    HostPort8000 -.->|Future Expose| FastAPICore
+    HostPort8001 -->|Expose| FastAPICore
 
     PGCore <--> PGVolume
+    FastAPICore <--> DevMount
     PGCore --- HealthCheck
 
     %% Inter-service communication
-    NextServer -.->|HTTP / REST (Planned)| FastAPICore
+    NextServer -.->|HTTP / REST| FastAPICore
     FastAPICore -.->|SQLAlchemy TCP:5432| PGCore
 
     classDef active fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
-    classDef planned fill:#1e1b4b,stroke:#a855f7,stroke-dasharray: 5 5,stroke-width:2px,color:#cbd5e1;
     classDef storage fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ecfdf5;
     
-    class NextServer,PGCore,HealthCheck active;
-    class FastAPICore planned;
-    class PGVolume storage;
+    class NextServer,PGCore,HealthCheck,FastAPICore active;
+    class PGVolume,DevMount storage;
 ```
 
 ---
@@ -162,12 +162,19 @@ flowchart LR
   start_period: 10s
   ```
 
-### 4.3 Service: `backend` (FastAPI — Planned / Deferred)
+### 4.3 Service: `backend` (FastAPI — Active)
 - **Build Context**: `./backend`
 - **Dockerfile**: `./backend/Dockerfile`
 - **Internal Port**: `8000`
-- **Host Port**: `${BACKEND_PORT:-8000}`
-- **Activation Mode**: Controlled by Docker Compose profiles:
+- **Host Port**: `${BACKEND_PORT:-8001}` (mapped to port 8001 to prevent collisions)
+- **Volume**: `./backend:/app` (live code mounting with auto-reload)
+- **Restart Policy**: `unless-stopped`
+- **Environment Variables**:
+  - `ENVIRONMENT`: `development`
+  - `DATABASE_URL`: `postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}`
+  - `POSTGRES_HOST`: `postgres`
+  - `POSTGRES_PORT`: `5432`
+  - `SECRET_KEY`: `${BACKEND_SECRET_KEY}`
   ```yaml
   profiles:
     - backend

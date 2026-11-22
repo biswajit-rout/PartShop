@@ -11,6 +11,15 @@ and follows the governance instructions established in `AGENTS.md`.
 
 ### Added
 - `docs/backend-architecture.md`: Created FastAPI Clean Layered Architecture specification, pedagogical learning principles, and complete 8-Milestone development roadmap with progress tracking.
+- `backend/Dockerfile`: Lightweight Python 3.12 Linux container for FastAPI with live reload and layer-cached pip installation.
+- `backend/requirements.txt`: Initialized Python dependencies for FastAPI, SQLAlchemy async, asyncpg, Alembic, Pydantic, and security modules.
+- Virtual environment setup (`.venv`) for isolated local backend execution.
+
+### Updated
+- `README.md`: Updated local quick start guide to reflect the activated FastAPI backend on port 8001 and streamlined post-restart Docker startup instructions.
+- `docker-compose.yml`: Activated `backend` service with volume mount (`./backend:/app`) for real-time development hot-reloading and remapped host port to 8001 to prevent host port 8000 collisions.
+- `.env`: Configured `BACKEND_PORT=8001` and updated `NEXT_PUBLIC_API_URL` to point to port 8001.
+- `docs/docker-architecture.md`: Updated architecture diagrams and service specifications to reflect active backend container topology.
 
 ---
 
