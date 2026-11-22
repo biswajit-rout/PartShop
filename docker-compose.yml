@@ -1,0 +1,87 @@
+services:
+  # =========================================================================
+  # Frontend Service: Next.js 16 (App Router + Liquid Glass UI)
+  # =========================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: partshop-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+    networks:
+      - partshop-network
+
+  # =========================================================================
+  # Database Service: PostgreSQL 16 Alpine
+  # =========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: partshop-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-partshop_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-partshop_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-partshop_db}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-partshop_user} -d ${POSTGRES_DB:-partshop_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - partshop-network
+
+  # =========================================================================
+  # Backend Service: FastAPI Python REST API (Planned / Target)
+  # NOTE: Activated automatically when backend code is placed in ./backend.
+  # The 'profiles' flag ensures 'docker compose up' works immediately without
+  # failing before ./backend/Dockerfile is created.
+  # Run 'docker compose --profile backend up' or remove the profiles line once
+  # the backend folder is created.
+  # =========================================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: partshop-backend
+    restart: unless-stopped
+    profiles:
+      - backend
+      - full
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-partshop_user}:${POSTGRES_PASSWORD:-partshop_secret}@postgres:5432/${POSTGRES_DB:-partshop_db}
+      - SECRET_KEY=${BACKEND_SECRET_KEY:-partshop_default_jwt_secret_key_change_in_production}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=1440
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - partshop-network
+
+# =========================================================================
+# Shared Network & Volumes
+# =========================================================================
+networks:
+  partshop-network:
+    name: partshop-network
+    driver: bridge
+
+volumes:
+  pgdata:
+    name: partshop-pgdata
+    driver: local
