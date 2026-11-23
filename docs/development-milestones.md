@@ -1,0 +1,912 @@
+# PartShop — Backend Development Milestones & Learning Roadmap
+
+> **Document Purpose**: Living progress tracker, detailed curriculum, code change ledger, and architectural guide for developing the PartShop production FastAPI backend.  
+> **Source of Truth**: Active Codebase (`d:/Programming/PartShop`)  
+> **Governance**: Maintained according to rules established in `AGENTS.md`.  
+> **Last Updated**: 2026-11-23  
+
+---
+
+## 1. Learning Philosophy & Collaboration Model
+
+This backend is built following a **Mentorship & Learning-First Engineering Model**:
+- **You write the code**: You create each file and write the code yourself to build muscle memory and deep practical understanding.
+- **Guidance on "Where" & "Why"**: Every step specifies the exact file location, clean beginner-friendly code, and plain-English explanations of *why* production systems are built that way.
+- **Living Code Ledger**: Every file created, along with its full code and explanation, is recorded right here in this document as our permanent reference manual.
+- **Synchronized Documentation**: Project documentation (`docs/`), diagrams, and change histories are kept 100% updated in lockstep.
+
+```mermaid
+flowchart LR
+    M0["Milestone 0<br/>Virtualenv & Pip<br/>(Done)"] --> M1["Milestone 1<br/>Core & Config<br/>(Done)"]
+    M1 --> M2["Milestone 2<br/>Models & Alembic<br/>(In Progress)"]
+    M2 --> M3["Milestone 3<br/>JWT Auth & RBAC<br/>(Next)"]
+    M3 --> M4["Milestone 4<br/>Parts & Repositories<br/>(Pending)"]
+    M4 --> M5["Milestone 5<br/>Atomic POS Billing<br/>(Pending)"]
+    M5 --> M6["Milestone 6<br/>Excel Imports & Reports<br/>(Pending)"]
+    M6 --> M7["Milestone 7<br/>Docker & Full Stack<br/>(Pending)"]
+
+    classDef done fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ecfdf5;
+    classDef current fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#cbd5e1;
+    classDef pending fill:#0f172a,stroke:#64748b,stroke-width:1px,color:#94a3b8;
+
+    class M0,M1 done;
+    class M2 current;
+    class M3,M4,M5,M6,M7 pending;
+```
+
+---
+
+## 2. Master Milestone Status Tracker
+
+| Milestone | Title | Key Objective | Status | Completed Date |
+| :--- | :--- | :--- | :---: | :---: |
+| **Milestone 0** | **Environment & Pip Setup** | Isolate dependencies in `.venv` and pin packages in `requirements.txt`. | `Completed` | 2026-11-22 |
+| **Milestone 1** | **Core Foundation & First API** | Pydantic `BaseSettings`, Async SQLAlchemy Engine, CORS, and `/health`. | `Completed` | 2026-11-23 |
+| **Milestone 2** | **Database Models & Alembic Migrations** | Define `User` and `SparePart` models, configure Alembic, and run migrations. | `Completed` | 2026-11-23 |
+| **Milestone 3** | **Security & Authentication (JWT + RBAC)** | Password hashing (bcrypt), JWT tokens, and role-based guards (`ADMIN`, `STAFF`). | `In Progress` | *Active* |
+| **Milestone 4** | **Clean Architecture & Spare Parts Catalog** | Repository Pattern, Inventory Service, barcode and bike model search. | `Pending` | — |
+| **Milestone 5** | **Atomic POS Billing Engine** | Row-level locking (`SELECT FOR UPDATE`), stock decrement, GST, and invoices. | `Pending` | — |
+| **Milestone 6** | **Excel Bulk Imports & Business Reporting** | Import `.xlsx` catalogs, batch validation, daily counter analytics. | `Pending` | — |
+| **Milestone 7** | **Dockerization & Next.js UI Integration** | Connect Next.js frontend calls to live FastAPI backend in Docker Compose. | `Pending` | — |
+
+---
+
+## 3. Milestone Code Changes & Detailed Explanations
+
+---
+
+### Milestone 0: Environment & Pip Setup
+- **Status**: `Completed` (2026-11-22)
+- **Objective**: Set up an isolated Python workspace without system library conflicts.
+
+#### 1. File Created: `backend/requirements.txt`
+```text
+# Web Framework & Server
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Database & Async Drivers
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+
+# Data Validation & Environment Settings
+pydantic==2.10.4
+pydantic-settings==2.7.0
+
+# Security, Passwords & JWT
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+python-multipart==0.0.20
+```
+
+> **Why each package exists**:
+> - `fastapi` & `uvicorn`: Web framework and ASGI server running on port 8000.
+> - `sqlalchemy` & `asyncpg`: Asynchronous ORM and non-blocking PostgreSQL driver.
+> - `alembic`: Database migration tool to evolve tables safely.
+> - `pydantic` & `pydantic-settings`: Type validation and reading `.env` variables.
+> - `passlib` & `python-jose`: Password hashing (bcrypt) and digital signature token creation (JWT).
+
+#### Commands Used:
+```powershell
+cd d:\Programming\PartShop
+mkdir backend
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+---
+
+### Milestone 1: Core Foundation & First API
+- **Status**: `Completed` (2026-11-23)
+- **Objective**: Establish the FastAPI application, environment configuration, database connection, and CORS middleware.
+
+#### 1. File Created: `backend/app/core/config.py`
+```python
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """
+    Application Settings:
+    Automatically reads environment variables from the root .env file.
+    If a variable is not found in .env, it uses the default value provided here.
+    """
+    # Project Info
+    PROJECT_NAME: str = "PartShop API"
+    VERSION: str = "1.0.0"
+    ENVIRONMENT: str = "development"
+
+    # Server Settings
+    PORT: int = 8000
+
+    # Database Configuration (matches our PostgreSQL container)
+    POSTGRES_USER: str = "partshop_user"
+    POSTGRES_PASSWORD: str = "partshop_secret_change_me"
+    POSTGRES_DB: str = "partshop_db"
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
+
+    # JWT Authentication Secrets
+    SECRET_KEY: str = "partshop_default_jwt_secret_key_change_in_production"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
+
+    # Computed Database URL for Async PostgreSQL (asyncpg driver)
+    @property
+    def DATABASE_URL(self) -> str:
+        return (
+            f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
+
+    # Read from the root .env file if available
+    model_config = SettingsConfigDict(
+        env_file="../.env",
+        env_file_encoding="utf-8",
+        extra="ignore"  # ignores other variables like FRONTEND_PORT
+    )
+
+
+# Create a single instance that the rest of the application can import
+settings = Settings()
+```
+> **Why**: Pydantic `BaseSettings` prevents hardcoding passwords in code and guarantees strict type validation for ports, URLs, and secrets.
+
+---
+
+#### 2. File Created: `backend/app/core/database.py`
+```python
+from collections.abc import AsyncGenerator
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.orm import DeclarativeBase
+from app.core.config import settings
+
+# 1. Create the Async Engine
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=settings.ENVIRONMENT == "development",
+    future=True,
+    pool_pre_ping=True,  # Automatically tests connection health before executing queries
+)
+
+# 2. Create the Session Factory
+AsyncSessionLocal = async_sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,  # Prevents attributes from expiring after commit
+    autoflush=False,
+)
+
+
+# 3. Declarative Base Class
+class Base(DeclarativeBase):
+    pass
+
+
+# 4. Database Session Dependency (get_db)
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
+```
+> **Why**: 
+> - `create_async_engine`: Asynchronous database connection pool.
+> - `get_db()`: Uses `yield` to inject a clean database session per request and guarantees session closure in `finally:` block.
+
+---
+
+#### 3. File Created: `backend/app/main.py`
+```python
+from fastapi import FastAPI, Depends
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.middleware.cors import CORSMiddleware
+from app.core.config import settings
+from app.core.database import get_db
+
+# 1. Initialize the FastAPI application
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version=settings.VERSION,
+    description="Backend API for PartShop Motorcycle Spare Parts Management & POS",
+)
+
+# 2. Add CORS Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",  # Next.js local development
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows GET, POST, PUT, DELETE, etc.
+    allow_headers=["*"],  # Allows Authorization headers, JSON content types
+)
+
+
+# 3. Root Endpoint
+@app.get("/")
+async def root():
+    """Simple greeting to confirm the server is running."""
+    return {
+        "message": "Welcome to PartShop API",
+        "docs": "/docs",
+        "environment": settings.ENVIRONMENT
+    }
+
+
+# 4. Health Check Endpoint
+@app.get("/health")
+async def health_check(db: AsyncSession = Depends(get_db)):
+    """Health check endpoint that verifies server and PostgreSQL connectivity."""
+    db_status = "connected"
+    try:
+        await db.execute(text("SELECT 1"))
+    except Exception as e:
+        db_status = f"disconnected: {str(e)}"
+
+    return {
+        "status": "healthy" if db_status == "connected" else "degraded",
+        "database": db_status,
+        "environment": settings.ENVIRONMENT,
+        "version": settings.VERSION,
+    }
+```
+> **Why**: Exposes CORS headers to allow Next.js (port 3000) to communicate with FastAPI (port 8001), and provides a `/health` endpoint verifying PostgreSQL connectivity.
+
+---
+
+#### 4. File Created: `backend/Dockerfile`
+```dockerfile
+# 1. Use official lightweight Python 3.12 Linux image
+FROM python:3.12-slim
+
+# 2. Prevent Python from buffering outputs and writing .pyc files
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# 3. Set the working directory inside the container
+WORKDIR /app
+
+# 4. Copy and install dependencies first (Docker layer caching)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 5. Copy the rest of the application code
+COPY . .
+
+# 6. Expose FastAPI port
+EXPOSE 8000
+
+# 7. Start Uvicorn with auto-reload enabled
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+```
+
+---
+
+#### 5. File Updated: `docker-compose.yml` (Backend Service)
+```yaml
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: partshop-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8001}:8000"
+    volumes:
+      - ./backend:/app
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-partshop_user}:${POSTGRES_PASSWORD:-partshop_secret_change_me}@postgres:5432/${POSTGRES_DB:-partshop_db}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-partshop_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-partshop_secret_change_me}
+      - POSTGRES_DB=${POSTGRES_DB:-partshop_db}
+      - SECRET_KEY=${BACKEND_SECRET_KEY:-partshop_default_jwt_secret_key_change_in_production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - partshop-network
+```
+> **Why**: Mounts `./backend:/app` for hot-reloading on Windows while executing inside Python 3.12 Linux, avoiding Windows Visual C++ compilation issues. Remaps host port to `8001` to resolve local port `8000` conflicts.
+
+---
+
+### Milestone 2: Database Models & Alembic Migrations
+- **Status**: `In Progress`
+- **Objective**: Translate real-world spare parts and cashier data into Python SQLAlchemy models and version-control them with Alembic.
+
+#### 1. File Created: `backend/app/models/base.py`
+```python
+from datetime import datetime, timezone
+from sqlalchemy import DateTime, func
+from sqlalchemy.orm import Mapped, mapped_column
+
+
+class TimestampMixin:
+    """
+    Reusable mixin that automatically adds created_at and updated_at
+    timestamps (in UTC) to any database table.
+    """
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+```
+> **Why**: Avoids code duplication across tables; guarantees all database records maintain UTC creation and modification timestamps.
+
+---
+
+#### 2. File Created: `backend/app/models/user.py`
+```python
+import enum
+from sqlalchemy import String, Boolean, Enum
+from sqlalchemy.orm import Mapped, mapped_column
+from app.core.database import Base
+from app.models.base import TimestampMixin
+
+
+class UserRole(str, enum.Enum):
+    """Available system roles for PartShop."""
+    ADMIN = "ADMIN"
+    STORE_MANAGER = "STORE_MANAGER"
+    COUNTER_STAFF = "COUNTER_STAFF"
+
+
+class User(Base, TimestampMixin):
+    """Database table storing cashier and staff credentials."""
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    email: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
+    full_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole),
+        default=UserRole.COUNTER_STAFF,
+        nullable=False,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<User id={self.id} username='{self.username}' role='{self.role}'>"
+```
+> **Why**: Provides indexed username/email lookups (`< 1ms`), stores secure password hashes, and provides role-based access control.
+
+---
+
+#### 3. File Created: `backend/app/models/spare_part.py`
+```python
+from decimal import Decimal
+from sqlalchemy import String, Integer, Numeric, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from app.core.database import Base
+from app.models.base import TimestampMixin
+
+
+class SparePart(Base, TimestampMixin):
+    """Database table representing an auto/motorcycle spare part item."""
+    __tablename__ = "spare_parts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    item_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    brand_name: Mapped[str] = mapped_column(String(100), index=True, nullable=False)  # e.g., Hero, Bajaj
+    part_number: Mapped[str] = mapped_column(String(100), index=True, nullable=False)  # OEM Part #
+    model_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    compatible_bikes: Mapped[str | None] = mapped_column(Text, nullable=True)  # e.g., "Splendor, Passion Pro"
+
+    # Inventory & Shelf Locator
+    quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    min_stock_alert: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    rack_number: Mapped[str | None] = mapped_column(String(50), nullable=True)  # e.g., "Rack-B, Shelf-2"
+
+    # Pricing & Discounts (Numeric prevents floating-point penny rounding bugs)
+    purchase_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    selling_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    customer_discount: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0.00"), nullable=False)
+    mechanic_discount: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0.00"), nullable=False)
+
+    # Scannable Barcode for POS Counter
+    barcode: Mapped[str | None] = mapped_column(String(100), unique=True, index=True, nullable=True)
+    qr_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<SparePart id={self.id} item='{self.item_name}' part_no='{self.part_number}' stock={self.quantity}>"
+```
+> **Why**:
+> - Uses `Numeric(10, 2)` instead of `Float` to eliminate floating-point currency rounding errors.
+> - Indexes `barcode` and `part_number` for instant counter barcode gun scans.
+> - Tracks physical shelf/rack positions (`rack_number`).
+
+---
+
+#### 4. File Created: `backend/app/models/__init__.py`
+```python
+from app.models.base import TimestampMixin
+from app.models.user import User, UserRole
+from app.models.spare_part import SparePart
+
+__all__ = ["TimestampMixin", "User", "UserRole", "SparePart"]
+```
+
+---
+
+#### 5. File Created: `backend/alembic.ini`
+```ini
+[alembic]
+script_location = alembic
+prepend_sys_path = .
+version_path_separator = os
+
+[loggers]
+keys = root,sqlalchemy,alembic
+
+[handlers]
+keys = console
+
+[formatters]
+keys = generic
+
+[logger_root]
+level = WARN
+handlers = console
+qualname =
+
+[logger_sqlalchemy]
+level = WARN
+handlers =
+qualname = sqlalchemy.engine
+
+[logger_alembic]
+level = INFO
+handlers =
+qualname = alembic
+
+[handler_console]
+class = StreamHandler
+args = (sys.stderr,)
+level = NOTSET
+formatter = generic
+
+[formatter_generic]
+format = %(levelname)-5.5s [%(name)s] %(message)s
+datefmt = %H:%M:%S
+```
+
+---
+
+#### 6. File Created: `backend/alembic/env.py`
+```python
+import asyncio
+from logging.config import fileConfig
+from sqlalchemy import pool
+from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import async_engine_from_config
+from alembic import context
+
+from app.core.config import settings
+from app.core.database import Base
+import app.models  # Ensures all models (User, SparePart) are registered
+
+config = context.config
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+target_metadata = Base.metadata
+
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+
+
+def run_migrations_offline() -> None:
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def do_run_migrations(connection: Connection) -> None:
+    context.configure(connection=connection, target_metadata=target_metadata)
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+async def run_async_migrations() -> None:
+    connectable = async_engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
+
+    await connectable.dispose()
+
+
+def run_migrations_online() -> None:
+    asyncio.run(run_async_migrations())
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+```
+
+---
+
+#### 7. File Created: `backend/alembic/script.py.mako`
+```mako
+"""${message}
+
+Revision ID: ${up_revision}
+Revises: ${down_revision | comma,n}
+Create Date: ${create_date}
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+${imports if imports else ""}
+
+# revision identifiers, used by Alembic.
+revision: str = ${repr(up_revision)}
+down_revision: Union[str, None] = ${repr(down_revision)}
+branch_labels: Union[str, Sequence[str], None] = ${repr(branch_labels)}
+depends_on: Union[str, Sequence[str], None] = ${repr(depends_on)}
+
+
+def upgrade() -> None:
+    ${upgrades if upgrades else "pass"}
+
+
+def downgrade() -> None:
+    ${downgrades if downgrades else "pass"}
+```
+
+---
+
+#### 8. Generated Migration: `backend/alembic/versions/5a6b63d2eae3_create_users_and_spare_parts_tables.py`
+```powershell
+docker compose exec backend alembic revision --autogenerate -m "create users and spare_parts tables"
+```
+> Generated migration code creating `users` and `spare_parts` tables and all associated indexes in PostgreSQL.
+
+---
+
+---
+
+### Milestone 3: Security & Authentication (JWT + RBAC)
+- **Status**: `In Progress`
+- **Objective**: Secure the application with cashier login, hashed passwords, cryptographic JSON Web Tokens (JWT), and role-based guards (`ADMIN`, `STAFF`).
+
+#### 1. File Created: `backend/app/core/security.py`
+```python
+from datetime import datetime, timedelta, timezone
+from typing import Any
+import bcrypt
+from jose import jwt
+from app.core.config import settings
+
+
+def hash_password(password: str) -> str:
+    """Transforms a plain-text password into a secure bcrypt hash."""
+    pwd_bytes = password.encode("utf-8")[:72]
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(pwd_bytes, salt)
+    return hashed.decode("utf-8")
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verifies a plain-text password against a stored bcrypt hash."""
+    pwd_bytes = plain_password.encode("utf-8")[:72]
+    hash_bytes = hashed_password.encode("utf-8")
+    return bcrypt.checkpw(pwd_bytes, hash_bytes)
+
+
+def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = None) -> str:
+    """
+    Creates an encrypted JSON Web Token (JWT) with user claims and expiration.
+    """
+    to_encode = data.copy()
+
+    # Set token expiration time (default from settings: 24 hours)
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+
+    to_encode.update({"exp": expire})
+
+    # Digitally sign the token using our SECRET_KEY and HS256 algorithm
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    return encoded_jwt
+```
+> **Why**:
+> - Direct `bcrypt`: Eliminates legacy `passlib` wrap-bug crashes on modern Python/bcrypt releases. Automatically truncates to bcrypt's 72-byte limit and handles salting securely.
+> - `create_access_token`: Generates signed, tamper-proof tokens containing the cashier's identity and permissions.
+
+---
+
+#### 2. File Created: `backend/app/schemas/user.py`
+```python
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict
+from app.models.user import UserRole
+
+
+# 1. Base User Schema (Shared fields)
+class UserBase(BaseModel):
+    username: str
+    email: str
+    full_name: str
+    role: UserRole = UserRole.COUNTER_STAFF
+
+
+# 2. Schema for Registering a New User (Includes plain password)
+class UserCreate(UserBase):
+    password: str
+
+
+# 3. Schema for Returning User Data (NEVER includes password!)
+class UserResponse(UserBase):
+    id: int
+    is_active: bool
+    created_at: datetime
+
+    # Pydantic v2: automatically reads from SQLAlchemy ORM models
+    model_config = ConfigDict(from_attributes=True)
+```
+> **Why**: Strict separation between data coming in (`UserCreate`) and data sent out (`UserResponse`). Passwords are never sent back in API responses.
+
+---
+
+#### 3. File Created: `backend/app/schemas/auth.py`
+```python
+from pydantic import BaseModel
+
+
+class LoginRequest(BaseModel):
+    """Payload sent by the cashier when logging in."""
+    username: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    """Payload returned upon successful authentication."""
+    access_token: str
+    token_type: str = "bearer"
+```
+> **Why**: Provides standardized token response DTOs matching OAuth2 standards.
+
+---
+
+#### 4. File Created: `backend/app/api/deps.py`
+```python
+from collections.abc import AsyncGenerator
+from typing import Annotated
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.database import get_db
+from app.models.user import User, UserRole
+
+# 1. OAuth2 scheme: Tells FastAPI that tokens arrive in the Authorization header
+# tokenUrl points to our login endpoint so Swagger UI's "Authorize" lock button works!
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+
+
+# 2. Dependency: Get Current Logged-in User
+async def get_current_user(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> User:
+    """
+    Decodes the JWT token from the request header, verifies its digital signature,
+    and loads the authenticated User from PostgreSQL.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        username: str | None = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+
+    result = await db.execute(select(User).where(User.username == username))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise credentials_exception
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user account",
+        )
+
+    return user
+
+
+# 3. Role-Based Access Control Guard (RBAC)
+def require_role(allowed_roles: list[UserRole]):
+    """
+    Dependency factory to protect sensitive endpoints (e.g. Admin-only operations).
+    """
+    async def role_checker(current_user: Annotated[User, Depends(get_current_user)]) -> User:
+        if current_user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Operation not permitted. Required role: {[r.value for r in allowed_roles]}",
+            )
+        return current_user
+
+    return role_checker
+```
+> **Why**:
+> - Centralized security gate: Every protected endpoint uses `Depends(get_current_user)`.
+> - If an expired or forged token arrives, it is rejected immediately with HTTP 401 before any database transactions occur.
+
+---
+
+#### 5. File Created: `backend/app/api/v1/endpoints/auth.py`
+```python
+from typing import Annotated
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.core.security import hash_password, verify_password, create_access_token
+from app.models.user import User
+from app.schemas.user import UserCreate, UserResponse
+from app.schemas.auth import TokenResponse
+from app.api.deps import get_current_user
+
+router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+# 1. Register Endpoint (Create New User)
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    user_in: UserCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Register a new staff member or administrator account."""
+    existing_user = await db.execute(
+        select(User).where((User.username == user_in.username) | (User.email == user_in.email))
+    )
+    if existing_user.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username or email is already registered",
+        )
+
+    new_user = User(
+        username=user_in.username,
+        email=user_in.email,
+        full_name=user_in.full_name,
+        password_hash=hash_password(user_in.password),
+        role=user_in.role,
+    )
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+    return new_user
+
+
+# 2. Login Endpoint (OAuth2 Form & JSON compatible)
+@router.post("/login", response_model=TokenResponse)
+async def login(
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Authenticate cashier credentials and return a Bearer JWT Token.
+    Compatible with Swagger UI's built-in Authorize dialog.
+    """
+    result = await db.execute(select(User).where(User.username == form_data.username))
+    user = result.scalar_one_or_none()
+
+    if not user or not verify_password(form_data.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is deactivated",
+        )
+
+    access_token = create_access_token(data={"sub": user.username, "role": user.role.value})
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
+
+
+# 3. Current User Profile Endpoint (Protected)
+@router.get("/me", response_model=UserResponse)
+async def get_me(
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Get profile details of the currently authenticated user."""
+    return current_user
+```
+
+---
+
+#### 6. File Created: `backend/app/api/v1/router.py`
+```python
+from fastapi import APIRouter
+from app.api.v1.endpoints import auth
+
+api_router = APIRouter()
+
+# Register Authentication endpoints under /api/v1/auth
+api_router.include_router(auth.router)
+```
+
+---
+
+#### 7. File Updated: `backend/app/main.py`
+Mounted the central `api_router`:
+```python
+from app.api.v1.router import api_router
+
+# Mount API v1 router under /api/v1
+app.include_router(api_router, prefix="/api/v1")
+```
+
+---
+
+### Planned Milestones:
+
+- **Milestone 4: Clean Architecture & Spare Parts Catalog**
+- **Milestone 5: Atomic POS Billing Engine**
+- **Milestone 6: Excel Bulk Imports & Business Reporting**
+- **Milestone 7: Docker Containerization & Next.js Integration**

@@ -89,6 +89,8 @@ project\-root/
 
 │   ├── deployment.md
 
+│   ├── development-milestones.md
+
 │   └── changelog.md
 
 │
@@ -365,6 +367,29 @@ Required Updates:
 - Environment documentation
 - Infrastructure overview
 - Release workflow
+
+---
+
+## docs/development-milestones.md
+
+Purpose:
+
+- Living progress tracker for development milestones
+- Curriculum and learning objectives
+- Detailed per-milestone file and concept inventory
+- Verification commands and progress status
+
+Update When:
+
+- A milestone starts or completes
+- New architectural milestones or learning objectives are introduced
+- Verification steps or files in a milestone change
+
+Required Updates:
+
+- Milestone status table
+- Completed date
+- Concepts and file inventories
 
 ---
 

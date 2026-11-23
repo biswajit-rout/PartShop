@@ -4,6 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import get_db
+from app.api.v1.router import api_router
+
 
 # 1. Initialize the FastAPI application
 app = FastAPI(
@@ -26,8 +28,12 @@ app.add_middleware(
     allow_headers=["*"],  # Allows Authorization headers, JSON content types
 )
 
+# Mount API v1 router
+app.include_router(api_router, prefix="/api/v1")
 
 # 3. Root Endpoint
+
+
 @app.get("/")
 async def root():
     """Simple greeting to confirm the server is running."""

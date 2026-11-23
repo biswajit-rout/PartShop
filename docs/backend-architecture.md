@@ -78,8 +78,8 @@ This tracker tracks our step-by-step progress. Each milestone builds directly on
 | Milestone | Title | Objective & Concepts Covered | Status |
 | :--- | :--- | :--- | :--- |
 | **Milestone 0** | **Environment & Pip Setup** | Set up `backend/`, virtual environment (`.venv`), and `requirements.txt`. Understand async Python drivers and pinned dependencies. | `Completed` |
-| **Milestone 1** | **Core Foundation & First API** | `config.py` (Pydantic settings), `database.py` (Async session factory), and `main.py` (FastAPI instance, CORS, `/health`). Run Uvicorn and explore Swagger UI (`/docs`). | `In Progress` |
-| **Milestone 2** | **Database Models & Alembic Migrations** | Define SQLAlchemy models (`User`, `SparePart`, `Supplier`, `Mechanic`). Set up Alembic and run async database migrations. | `Pending` |
+| **Milestone 1** | **Core Foundation & First API** | `config.py` (Pydantic settings), `database.py` (Async session factory), and `main.py` (FastAPI instance, CORS, `/health`). Run Uvicorn and explore Swagger UI (`/docs`). | `Completed` |
+| **Milestone 2** | **Database Models & Alembic Migrations** | Define SQLAlchemy models (`User`, `SparePart`, `Supplier`, `Mechanic`). Set up Alembic and run async database migrations. | `In Progress` |
 | **Milestone 3** | **Security & Authentication (JWT + RBAC)** | Password hashing (bcrypt), generating JWT tokens, FastAPI Dependency Injection (`get_current_user`), and role-based guards (`ADMIN`, `STAFF`). | `Pending` |
 | **Milestone 4** | **Clean Architecture & Spare Parts Catalog** | Implement the Repository Pattern and Service Layer for Spare Parts. Search by bike model, barcode, part number with pagination. | `Pending` |
 | **Milestone 5** | **Atomic POS Billing Engine** | Implement atomic transactions with row-level locking (`SELECT ... FOR UPDATE`), stock decrementing, GST calculation, and mechanic commissions. | `Pending` |

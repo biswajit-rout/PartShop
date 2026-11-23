@@ -7,6 +7,31 @@ and follows the governance instructions established in `AGENTS.md`.
 
 ---
 
+## 2026-11-23
+
+### Added
+- `backend/app/core/security.py`: Password hashing with bcrypt (`pwd_context`) and cryptographic JWT token creation (`create_access_token`).
+- `backend/app/schemas/user.py` & `backend/app/schemas/auth.py`: Pydantic request and response DTOs for user registration, profile retrieval, and OAuth2 token issuance.
+- `backend/app/api/deps.py`: FastAPI Dependency Injection for JWT authentication (`get_current_user`), `OAuth2PasswordBearer`, and role-based access control guards (`require_role`).
+- `backend/app/api/v1/endpoints/auth.py`: Implemented `/register`, `/login`, and `/me` authentication endpoints.
+- `backend/app/api/v1/router.py`: Centralized v1 API router mounting all modular domain endpoints.
+- `backend/alembic/versions/5a6b63d2eae3_create_users_and_spare_parts_tables.py`: Initial database migration script for `users` and `spare_parts` tables.
+- `docs/api-reference.md`: Documented REST API contracts, request/response DTOs, and error schemes for authentication endpoints (`/register`, `/login`, `/me`).
+- `docs/development-milestones.md`: Created master milestone learning roadmap, detailed per-milestone file inventories, live progress tracker, and complete code-change ledger documenting all source code and engineering rationale.
+- `docs/database-design.md`: Created detailed PostgreSQL database architecture, ER diagrams, indexing strategies, and table specifications for `users` and `spare_parts`.
+- `backend/app/core/database.py`: Implemented asynchronous SQLAlchemy 2.0 connection engine, sessionmaker, and `get_db` FastAPI dependency with connection healthchecks.
+
+### Fixed
+- `backend/app/core/security.py`: Refactored password hashing to use direct `bcrypt` (`hashpw`/`checkpw`), eliminating the infamous legacy `passlib` wrap-bug (`ValueError: password cannot be longer than 72 bytes`) on modern bcrypt versions.
+- `backend/app/schemas/user.py`: Replaced `EmailStr` with standard `str` to eliminate external `email-validator` runtime dependency crashes during Uvicorn reload.
+
+### Updated
+- `backend/app/main.py`: Mounted `api_router` under `/api/v1` and connected the `/health` endpoint to the live PostgreSQL container.
+- `docs/development-milestones.md`: Updated code ledger with complete source code and technical documentation for Milestone 3.
+- `AGENTS.md`: Integrated `docs/development-milestones.md` into project structure and defined documentation ownership policies.
+
+---
+
 ## 2026-11-22
 
 ### Added
