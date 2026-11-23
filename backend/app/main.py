@@ -1,6 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from app.core.database import get_db
 
 # 1. Initialize the FastAPI application
 app = FastAPI(
@@ -36,11 +39,28 @@ async def root():
 
 
 # 4. Health Check Endpoint
+# @app.get("/health")
+# async def health_check():
+#     """Used by Docker and monitoring services to verify server health."""
+#     return {
+#         "status": "healthy",
+#         "service": settings.PROJECT_NAME,
+#         "version": settings.VERSION
+#     }
+
 @app.get("/health")
-async def health_check():
-    """Used by Docker and monitoring services to verify server health."""
+async def health_check(db: AsyncSession = Depends(get_db)):
+    """Health check endpoint that verifies server and PostgreSQL connectivity."""
+    db_status = "connected"
+    try:
+        # Executes a lightweight ping to PostgreSQL
+        await db.execute(text("SELECT 1"))
+    except Exception as e:
+        db_status = f"disconnected: {str(e)}"
+
     return {
-        "status": "healthy",
-        "service": settings.PROJECT_NAME,
-        "version": settings.VERSION
+        "status": "healthy" if db_status == "connected" else "degraded",
+        "database": db_status,
+        "environment": settings.ENVIRONMENT,
+        "version": settings.VERSION,
     }
