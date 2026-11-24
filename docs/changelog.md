@@ -7,9 +7,25 @@ and follows the governance instructions established in `AGENTS.md`.
 
 ---
 
+## 2026-11-24
+
+### Added
+- `backend/app/schemas/spare_part.py`: Implemented Pydantic v2 schemas for spare parts (`SparePartCreate`, `SparePartUpdate`, `SparePartResponse`, and `PaginatedSpareParts`).
+- `backend/app/repositories/base.py`: Built generic asynchronous repository (`BaseRepository[ModelType]`) providing reusable CRUD operations across all domain entities.
+- `backend/app/repositories/spare_part_repo.py`: Implemented `SparePartRepository` featuring case-insensitive multi-field search (`ilike`), brand filtering, barcode scanning, and low-stock queries.
+- `backend/app/services/inventory_service.py`: Implemented business logic service for catalog management, duplicate barcode/part number validation, and stock adjustments.
+- `backend/app/api/v1/endpoints/spare_parts.py`: REST endpoints for creating, searching, updating, and barcode-scanning spare parts with role-based guards.
+
+### Updated
+- `backend/app/api/v1/router.py`: Registered `spare_parts.router` under `/api/v1/parts`.
+- `docs/development-milestones.md`: Marked Milestone 4 as Completed, added complete source code, architectural reasoning, and marked Milestone 5 as Active.
+
+---
+
 ## 2026-11-23
 
 ### Added
+- `docs/api-reference.md`: Documented Spare Parts catalog endpoints (`/api/v1/parts`), barcode gun scanner lookup, and low-stock filtering.
 - `backend/app/core/security.py`: Password hashing with bcrypt (`pwd_context`) and cryptographic JWT token creation (`create_access_token`).
 - `backend/app/schemas/user.py` & `backend/app/schemas/auth.py`: Pydantic request and response DTOs for user registration, profile retrieval, and OAuth2 token issuance.
 - `backend/app/api/deps.py`: FastAPI Dependency Injection for JWT authentication (`get_current_user`), `OAuth2PasswordBearer`, and role-based access control guards (`require_role`).

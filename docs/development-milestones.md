@@ -43,9 +43,9 @@ flowchart LR
 | **Milestone 0** | **Environment & Pip Setup** | Isolate dependencies in `.venv` and pin packages in `requirements.txt`. | `Completed` | 2026-11-22 |
 | **Milestone 1** | **Core Foundation & First API** | Pydantic `BaseSettings`, Async SQLAlchemy Engine, CORS, and `/health`. | `Completed` | 2026-11-23 |
 | **Milestone 2** | **Database Models & Alembic Migrations** | Define `User` and `SparePart` models, configure Alembic, and run migrations. | `Completed` | 2026-11-23 |
-| **Milestone 3** | **Security & Authentication (JWT + RBAC)** | Password hashing (bcrypt), JWT tokens, and role-based guards (`ADMIN`, `STAFF`). | `In Progress` | *Active* |
-| **Milestone 4** | **Clean Architecture & Spare Parts Catalog** | Repository Pattern, Inventory Service, barcode and bike model search. | `Pending` | — |
-| **Milestone 5** | **Atomic POS Billing Engine** | Row-level locking (`SELECT FOR UPDATE`), stock decrement, GST, and invoices. | `Pending` | — |
+| **Milestone 3** | **Security & Authentication (JWT + RBAC)** | Password hashing (bcrypt), JWT tokens, and role-based guards (`ADMIN`, `STAFF`). | `Completed` | 2026-11-23 |
+| **Milestone 4** | **Clean Architecture & Spare Parts Catalog** | Repository Pattern, Inventory Service, barcode and bike model search. | `Completed` | 2026-11-24 |
+| **Milestone 5** | **Atomic POS Billing Engine** | Row-level locking (`SELECT FOR UPDATE`), stock decrement, GST, and invoices. | `In Progress` | *Active* |
 | **Milestone 6** | **Excel Bulk Imports & Business Reporting** | Import `.xlsx` catalogs, batch validation, daily counter analytics. | `Pending` | — |
 | **Milestone 7** | **Dockerization & Next.js UI Integration** | Connect Next.js frontend calls to live FastAPI backend in Docker Compose. | `Pending` | — |
 
@@ -904,9 +904,433 @@ app.include_router(api_router, prefix="/api/v1")
 
 ---
 
+---
+
+### Milestone 4: Clean Architecture & Spare Parts Catalog
+- **Status**: `Completed` (2026-11-24)
+- **Objective**: Implement Clean Layered Architecture (Schemas -> Repositories -> Services -> Endpoints) for spare parts management, case-insensitive multi-field search, barcode scanning, and low-stock alerts.
+
+#### 1. File Created: `backend/app/schemas/spare_part.py`
+```python
+from datetime import datetime
+from decimal import Decimal
+from pydantic import BaseModel, ConfigDict
+
+
+# 1. Base Shared Fields
+class SparePartBase(BaseModel):
+    item_name: str
+    brand_name: str
+    part_number: str
+    model_number: str | None = None
+    compatible_bikes: str | None = None
+    quantity: int = 0
+    min_stock_alert: int = 5
+    rack_number: str | None = None
+    purchase_price: Decimal
+    selling_price: Decimal
+    customer_discount: Decimal = Decimal("0.00")
+    mechanic_discount: Decimal = Decimal("0.00")
+    barcode: str | None = None
+    qr_code: str | None = None
+
+
+# 2. Schema for Creating a Part (POST)
+class SparePartCreate(SparePartBase):
+    pass
+
+
+# 3. Schema for Updating a Part (PUT)
+class SparePartUpdate(BaseModel):
+    item_name: str | None = None
+    brand_name: str | None = None
+    part_number: str | None = None
+    model_number: str | None = None
+    compatible_bikes: str | None = None
+    quantity: int | None = None
+    min_stock_alert: int | None = None
+    rack_number: str | None = None
+    purchase_price: Decimal | None = None
+    selling_price: Decimal | None = None
+    customer_discount: Decimal | None = None
+    mechanic_discount: Decimal | None = None
+    barcode: str | None = None
+    qr_code: str | None = None
+
+
+# 4. Schema Returned to Frontend (GET)
+class SparePartResponse(SparePartBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# 5. Paginated Catalog Response
+class PaginatedSpareParts(BaseModel):
+    total: int
+    skip: int
+    limit: int
+    items: list[SparePartResponse]
+```
+> **Why**:
+> - Uses `Decimal` for currency values (`purchase_price`, `selling_price`) to eliminate floating-point penny rounding issues.
+> - `PaginatedSpareParts`: Paginates large 10,000+ spare parts catalogs efficiently without overwhelming the client.
+
+---
+
+#### 2. File Created: `backend/app/repositories/base.py`
+```python
+from typing import Generic, TypeVar
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.database import Base
+
+ModelType = TypeVar("ModelType", bound=Base)
+
+
+class BaseRepository(Generic[ModelType]):
+    """
+    Generic repository providing common database CRUD operations
+    so we don't have to repeat standard SQL queries for every model.
+    """
+
+    def __init__(self, model: type[ModelType], db: AsyncSession):
+        self.model = model
+        self.db = db
+
+    async def get_by_id(self, id: int) -> ModelType | None:
+        """Fetch a single record by primary key."""
+        result = await self.db.execute(select(self.model).where(self.model.id == id))
+        return result.scalar_one_or_none()
+
+    async def count(self) -> int:
+        """Return total row count."""
+        result = await self.db.execute(select(func.count(self.model.id)))
+        return result.scalar_one() or 0
+
+    async def create(self, instance: ModelType) -> ModelType:
+        """Add and commit a new record."""
+        self.db.add(instance)
+        await self.db.commit()
+        await self.db.refresh(instance)
+        return instance
+
+    async def delete(self, instance: ModelType) -> None:
+        """Delete a record."""
+        await self.db.delete(instance)
+        await self.db.commit()
+```
+> **Why**:
+> - Reusable generic CRUD foundation: Eliminates duplicate SQL queries across different domain tables.
+
+---
+
+#### 3. File Created: `backend/app/repositories/spare_part_repo.py`
+```python
+from sqlalchemy import select, or_, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.spare_part import SparePart
+from app.repositories.base import BaseRepository
+
+
+class SparePartRepository(BaseRepository[SparePart]):
+    """Specialized repository for querying the spare parts catalog."""
+
+    def __init__(self, db: AsyncSession):
+        super().__init__(SparePart, db)
+
+    async def get_by_barcode(self, barcode: str) -> SparePart | None:
+        """Instant lookup by barcode scanner gun at the billing counter."""
+        result = await self.db.execute(select(SparePart).where(SparePart.barcode == barcode))
+        return result.scalar_one_or_none()
+
+    async def get_by_part_number(self, part_number: str) -> SparePart | None:
+        """Lookup by exact OEM part number."""
+        result = await self.db.execute(select(SparePart).where(SparePart.part_number == part_number))
+        return result.scalar_one_or_none()
+
+    async def search_parts(
+        self,
+        query: str | None = None,
+        brand: str | None = None,
+        low_stock_only: bool = False,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> tuple[list[SparePart], int]:
+        """
+        Multi-field search across item name, part number, and bike model
+        with optional brand filter and low-stock threshold alert.
+        """
+        stmt = select(SparePart)
+
+        # 1. Full-text search across item name, part number, and compatible bikes
+        if query:
+            search_pattern = f"%{query}%"
+            stmt = stmt.where(
+                or_(
+                    SparePart.item_name.ilike(search_pattern),
+                    SparePart.part_number.ilike(search_pattern),
+                    SparePart.compatible_bikes.ilike(search_pattern),
+                )
+            )
+
+        # 2. Filter by brand
+        if brand:
+            stmt = stmt.where(SparePart.brand_name.ilike(brand))
+
+        # 3. Filter low stock
+        if low_stock_only:
+            stmt = stmt.where(SparePart.quantity <= SparePart.min_stock_alert)
+
+        # Count total matching rows (for pagination)
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total_result = await self.db.execute(count_stmt)
+        total = total_result.scalar_one() or 0
+
+        # Apply ordering and pagination
+        stmt = stmt.order_by(SparePart.item_name.asc()).offset(skip).limit(limit)
+        items_result = await self.db.execute(stmt)
+        items = list(items_result.scalars().all())
+
+        return items, total
+```
+> **Why**:
+> - `ilike`: Case-insensitive search allowing counter cashiers to search by brand, part number, or bike model with ease.
+> - `low_stock_only`: One-click filter for store managers to identify inventory that has fallen below reorder thresholds.
+
+---
+
+#### 4. File Created: `backend/app/services/inventory_service.py`
+```python
+from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.spare_part import SparePart
+from app.repositories.spare_part_repo import SparePartRepository
+from app.schemas.spare_part import SparePartCreate, SparePartUpdate
+
+
+class InventoryService:
+    """
+    Business Logic Layer for managing Spare Parts.
+    Enforces business rules (duplicate checks, validation) before saving to PostgreSQL.
+    """
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.repo = SparePartRepository(db)
+
+    async def create_part(self, part_data: SparePartCreate) -> SparePart:
+        """Create a new spare part ensuring no duplicate part numbers or barcodes exist."""
+        existing_part_no = await self.repo.get_by_part_number(part_data.part_number)
+        if existing_part_no:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Spare part with Part Number '{part_data.part_number}' already exists.",
+            )
+
+        if part_data.barcode:
+            existing_barcode = await self.repo.get_by_barcode(part_data.barcode)
+            if existing_barcode:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Spare part with Barcode '{part_data.barcode}' already exists.",
+                )
+
+        new_part = SparePart(**part_data.model_dump())
+        return await self.repo.create(new_part)
+
+    async def get_part_by_id(self, part_id: int) -> SparePart:
+        """Fetch part by ID or raise HTTP 404."""
+        part = await self.repo.get_by_id(part_id)
+        if not part:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Spare part with ID {part_id} not found.",
+            )
+        return part
+
+    async def get_part_by_barcode(self, barcode: str) -> SparePart:
+        """Instant lookup for counter barcode scanner guns."""
+        part = await self.repo.get_by_barcode(barcode)
+        if not part:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No spare part found with barcode '{barcode}'.",
+            )
+        return part
+
+    async def search_catalog(
+        self,
+        query: str | None = None,
+        brand: str | None = None,
+        low_stock_only: bool = False,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> tuple[list[SparePart], int]:
+        """Search parts with filters and pagination."""
+        return await self.repo.search_parts(
+            query=query,
+            brand=brand,
+            low_stock_only=low_stock_only,
+            skip=skip,
+            limit=limit,
+        )
+
+    async def update_part(self, part_id: int, update_data: SparePartUpdate) -> SparePart:
+        """Update part details."""
+        part = await self.get_part_by_id(part_id)
+
+        if update_data.barcode and update_data.barcode != part.barcode:
+            existing = await self.repo.get_by_barcode(update_data.barcode)
+            if existing and existing.id != part_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Barcode '{update_data.barcode}' is already assigned to another part.",
+                )
+
+        for field, value in update_data.model_dump(exclude_unset=True).items():
+            setattr(part, field, value)
+
+        await self.db.commit()
+        await self.db.refresh(part)
+        return part
+
+    async def delete_part(self, part_id: int) -> None:
+        """Delete part from inventory."""
+        part = await self.get_part_by_id(part_id)
+        await self.repo.delete(part)
+```
+> **Why**:
+> - Enforces business logic (duplicate barcode validation, 404 handling) in a centralized service rather than scattering it in route handlers.
+
+---
+
+#### 5. File Created: `backend/app/api/v1/endpoints/spare_parts.py`
+```python
+from typing import Annotated
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.models.user import User, UserRole
+from app.schemas.spare_part import (
+    SparePartCreate,
+    SparePartUpdate,
+    SparePartResponse,
+    PaginatedSpareParts,
+)
+from app.services.inventory_service import InventoryService
+from app.api.deps import get_current_user, require_role
+
+router = APIRouter(prefix="/parts", tags=["Spare Parts Catalog"])
+
+
+# 1. Create a New Spare Part (Admin & Store Manager only)
+@router.post(
+    "/",
+    response_model=SparePartResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_role([UserRole.ADMIN, UserRole.STORE_MANAGER]))],
+)
+async def create_spare_part(
+    part_in: SparePartCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Add a new spare part to inventory. Requires Admin or Store Manager role."""
+    service = InventoryService(db)
+    return await service.create_part(part_in)
+
+
+# 2. Search & List Spare Parts (All Authenticated Staff)
+@router.get("/", response_model=PaginatedSpareParts)
+async def list_spare_parts(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    q: str | None = Query(None, description="Search term across name, part #, or bike model"),
+    brand: str | None = Query(None, description="Filter by brand (e.g. Hero, Bajaj)"),
+    low_stock_only: bool = Query(False, description="Filter only items below min stock threshold"),
+    skip: int = Query(0, ge=0, description="Pagination offset"),
+    limit: int = Query(50, ge=1, le=100, description="Page size limit"),
+):
+    """Search and browse spare parts with pagination and filters."""
+    service = InventoryService(db)
+    items, total = await service.search_catalog(
+        query=q,
+        brand=brand,
+        low_stock_only=low_stock_only,
+        skip=skip,
+        limit=limit,
+    )
+    return {
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "items": items,
+    }
+
+
+# 3. Barcode Gun Scanner Lookup (Fast Point-of-Sale check)
+@router.get("/barcode/{barcode}", response_model=SparePartResponse)
+async def get_by_barcode(
+    barcode: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Instant lookup when scanning a physical barcode at the billing counter."""
+    service = InventoryService(db)
+    return await service.get_part_by_barcode(barcode)
+
+
+# 4. Get Part Details by ID
+@router.get("/{part_id}", response_model=SparePartResponse)
+async def get_spare_part(
+    part_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Get spare part details by unique ID."""
+    service = InventoryService(db)
+    return await service.get_part_by_id(part_id)
+
+
+# 5. Update Spare Part (Admin & Store Manager only)
+@router.put(
+    "/{part_id}",
+    response_model=SparePartResponse,
+    dependencies=[Depends(require_role([UserRole.ADMIN, UserRole.STORE_MANAGER]))],
+)
+async def update_spare_part(
+    part_id: int,
+    part_update: SparePartUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Update spare part details, pricing, or rack location."""
+    service = InventoryService(db)
+    return await service.update_part(part_id, part_update)
+```
+
+---
+
+#### 6. File Updated: `backend/app/api/v1/router.py`
+```python
+from fastapi import APIRouter
+from app.api.v1.endpoints import auth, spare_parts
+
+api_router = APIRouter()
+
+# Register Authentication endpoints under /api/v1/auth
+api_router.include_router(auth.router)
+
+# Register Spare Parts endpoints under /api/v1/parts
+api_router.include_router(spare_parts.router)
+```
+
+---
+
 ### Planned Milestones:
 
-- **Milestone 4: Clean Architecture & Spare Parts Catalog**
 - **Milestone 5: Atomic POS Billing Engine**
 - **Milestone 6: Excel Bulk Imports & Business Reporting**
 - **Milestone 7: Docker Containerization & Next.js Integration**
