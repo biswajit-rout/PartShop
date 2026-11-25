@@ -7,6 +7,26 @@ and follows the governance instructions established in `AGENTS.md`.
 
 ---
 
+## 2026-11-25
+
+### Added
+- `backend/app/models/sale.py`: Implemented `Sale` invoice entity and `SaleItem` line-items with `PaymentMethod` enum (`CASH`, `CARD`, `UPI`, `CREDIT`) and cascade lifecycle management.
+- `backend/app/models/stock_movement.py`: Implemented `StockMovement` immutable audit ledger model and `StockMovementType` enum (`SALE_OUT`, `PURCHASE_IN`, `RETURN_IN`, `ADJUSTMENT`).
+- `backend/alembic/versions/f8446218d474_create_sales_and_stock_movements_tables.py`: Generated and applied database migration creating `sales`, `sale_items`, and `stock_movements` tables in PostgreSQL.
+- `backend/app/schemas/billing.py`: Implemented Pydantic v2 schemas (`CartItemInput`, `CheckoutRequest`, `SaleItemResponse`, `InvoiceResponse`) for POS checkout transactions and invoice rendering.
+- `backend/app/services/billing_service.py`: Implemented core atomic POS checkout engine featuring PostgreSQL row-level locking (`with_for_update()`), inventory validation and decrementing, 18% GST calculation, immutable audit ledger tracking, and atomic rollback guarantees.
+- `backend/app/api/v1/endpoints/billing.py`: Implemented POS billing endpoints (`POST /api/v1/billing/checkout` and `GET /api/v1/billing/invoices/{invoice_id}`) guarded by JWT authentication.
+- `docs/api-reference.md`: Added Section 4 detailing POS counter billing endpoints, request/response contracts, and error handling.
+
+### Updated
+- `backend/app/models/__init__.py`: Registered `Sale`, `SaleItem`, `PaymentMethod`, `StockMovement`, and `StockMovementType`.
+- `backend/app/api/v1/router.py`: Mounted `billing.router` under `/api/v1/billing`.
+- `docs/development-milestones.md`: Marked Milestone 5 as Completed, added complete source code and architectural explanations for schemas, billing service, endpoints, and router, and marked Milestone 6 as Active.
+- `docs/database-design.md`: Added detailed schema definitions for `sales`, `sale_items`, and `stock_movements`.
+- `docs/backend-architecture.md`: Updated milestone status roadmap to reflect Milestone 5 completion and Milestone 6 activation.
+
+---
+
 ## 2026-11-24
 
 ### Added

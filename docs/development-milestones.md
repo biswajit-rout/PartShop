@@ -3,7 +3,7 @@
 > **Document Purpose**: Living progress tracker, detailed curriculum, code change ledger, and architectural guide for developing the PartShop production FastAPI backend.  
 > **Source of Truth**: Active Codebase (`d:/Programming/PartShop`)  
 > **Governance**: Maintained according to rules established in `AGENTS.md`.  
-> **Last Updated**: 2026-11-23  
+> **Last Updated**: 2026-11-25  
 
 ---
 
@@ -18,20 +18,20 @@ This backend is built following a **Mentorship & Learning-First Engineering Mode
 ```mermaid
 flowchart LR
     M0["Milestone 0<br/>Virtualenv & Pip<br/>(Done)"] --> M1["Milestone 1<br/>Core & Config<br/>(Done)"]
-    M1 --> M2["Milestone 2<br/>Models & Alembic<br/>(In Progress)"]
-    M2 --> M3["Milestone 3<br/>JWT Auth & RBAC<br/>(Next)"]
-    M3 --> M4["Milestone 4<br/>Parts & Repositories<br/>(Pending)"]
-    M4 --> M5["Milestone 5<br/>Atomic POS Billing<br/>(Pending)"]
-    M5 --> M6["Milestone 6<br/>Excel Imports & Reports<br/>(Pending)"]
+    M1 --> M2["Milestone 2<br/>Models & Alembic<br/>(Done)"]
+    M2 --> M3["Milestone 3<br/>JWT Auth & RBAC<br/>(Done)"]
+    M3 --> M4["Milestone 4<br/>Parts & Repositories<br/>(Done)"]
+    M4 --> M5["Milestone 5<br/>Atomic POS Billing<br/>(Done)"]
+    M5 --> M6["Milestone 6<br/>Excel Imports & Reports<br/>(In Progress)"]
     M6 --> M7["Milestone 7<br/>Docker & Full Stack<br/>(Pending)"]
 
     classDef done fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ecfdf5;
     classDef current fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#cbd5e1;
     classDef pending fill:#0f172a,stroke:#64748b,stroke-width:1px,color:#94a3b8;
 
-    class M0,M1 done;
-    class M2 current;
-    class M3,M4,M5,M6,M7 pending;
+    class M0,M1,M2,M3,M4,M5 done;
+    class M6 current;
+    class M7 pending;
 ```
 
 ---
@@ -39,14 +39,14 @@ flowchart LR
 ## 2. Master Milestone Status Tracker
 
 | Milestone | Title | Key Objective | Status | Completed Date |
-| :--- | :--- | :--- | :---: | :---: |
+| :--- | :--- | :--- | :--- | :---: |
 | **Milestone 0** | **Environment & Pip Setup** | Isolate dependencies in `.venv` and pin packages in `requirements.txt`. | `Completed` | 2026-11-22 |
 | **Milestone 1** | **Core Foundation & First API** | Pydantic `BaseSettings`, Async SQLAlchemy Engine, CORS, and `/health`. | `Completed` | 2026-11-23 |
 | **Milestone 2** | **Database Models & Alembic Migrations** | Define `User` and `SparePart` models, configure Alembic, and run migrations. | `Completed` | 2026-11-23 |
 | **Milestone 3** | **Security & Authentication (JWT + RBAC)** | Password hashing (bcrypt), JWT tokens, and role-based guards (`ADMIN`, `STAFF`). | `Completed` | 2026-11-23 |
 | **Milestone 4** | **Clean Architecture & Spare Parts Catalog** | Repository Pattern, Inventory Service, barcode and bike model search. | `Completed` | 2026-11-24 |
-| **Milestone 5** | **Atomic POS Billing Engine** | Row-level locking (`SELECT FOR UPDATE`), stock decrement, GST, and invoices. | `In Progress` | *Active* |
-| **Milestone 6** | **Excel Bulk Imports & Business Reporting** | Import `.xlsx` catalogs, batch validation, daily counter analytics. | `Pending` | — |
+| **Milestone 5** | **Atomic POS Billing Engine** | Row-level locking (`SELECT FOR UPDATE`), stock decrement, GST, and invoices. | `Completed` | 2026-11-25 |
+| **Milestone 6** | **Excel Bulk Imports & Business Reporting** | Import `.xlsx` catalogs, batch validation, daily counter analytics. | `In Progress` | *Active* |
 | **Milestone 7** | **Dockerization & Next.js UI Integration** | Connect Next.js frontend calls to live FastAPI backend in Docker Compose. | `Pending` | — |
 
 ---
@@ -1329,8 +1329,451 @@ api_router.include_router(spare_parts.router)
 
 ---
 
+---
+
+### Milestone 5: Atomic POS Billing Engine
+- **Status**: `Completed` (2026-11-25)
+- **Objective**: Build the core financial transaction engine: invoices, line items, payment tracking, immutable stock audit ledger, and atomic checkout transactions with row-level locking (`SELECT ... FOR UPDATE`).
+
+#### 1. File Created: `backend/app/models/sale.py`
+```python
+import enum
+from decimal import Decimal
+from sqlalchemy import String, Integer, Numeric, ForeignKey, Enum
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from app.core.database import Base
+from app.models.base import TimestampMixin
+
+
+class PaymentMethod(str, enum.Enum):
+    """Payment channels supported at the counter."""
+    CASH = "CASH"
+    CARD = "CARD"
+    UPI = "UPI"
+    CREDIT = "CREDIT"
+
+
+class Sale(Base, TimestampMixin):
+    """Customer sales invoice record."""
+    __tablename__ = "sales"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    invoice_number: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+
+    customer_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    customer_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    # Staff member who handled this checkout
+    cashier_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    # Financial Breakdown
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"), nullable=False)
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"), nullable=False)  # GST
+    grand_total: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+
+    payment_method: Mapped[PaymentMethod] = mapped_column(
+        Enum(PaymentMethod), default=PaymentMethod.CASH, nullable=False
+    )
+
+    # Relationships
+    items: Mapped[list["SaleItem"]] = relationship("SaleItem", back_populates="sale", cascade="all, delete-orphan")
+
+
+class SaleItem(Base):
+    """Individual line item sold within an invoice."""
+    __tablename__ = "sale_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("sales.id"), nullable=False)
+    spare_part_id: Mapped[int] = mapped_column(ForeignKey("spare_parts.id"), nullable=False)
+
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    discount_percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0.00"), nullable=False)
+    total_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+
+    # Relationship back to parent invoice
+    sale: Mapped["Sale"] = relationship("Sale", back_populates="items")
+```
+> **Why**:
+> - `cascade="all, delete-orphan"`: Deleting an invoice automatically cleans up its child line items.
+> - `unit_price` stored on `SaleItem`: Preserves the historical price paid at the time of purchase even if the catalog price changes later.
+
+---
+
+#### 2. File Created: `backend/app/models/stock_movement.py`
+```python
+import enum
+from datetime import datetime, timezone
+from sqlalchemy import String, Integer, DateTime, ForeignKey, Enum, func
+from sqlalchemy.orm import Mapped, mapped_column
+from app.core.database import Base
+
+
+class StockMovementType(str, enum.Enum):
+    SALE_OUT = "SALE_OUT"          # Sold at counter
+    PURCHASE_IN = "PURCHASE_IN"    # Received from supplier
+    RETURN_IN = "RETURN_IN"        # Customer return
+    ADJUSTMENT = "ADJUSTMENT"      # Manual count adjustment / damage
+
+
+class StockMovement(Base):
+    """Immutable audit trail for every inventory change."""
+    __tablename__ = "stock_movements"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    spare_part_id: Mapped[int] = mapped_column(ForeignKey("spare_parts.id"), nullable=False)
+
+    movement_type: Mapped[StockMovementType] = mapped_column(Enum(StockMovementType), nullable=False)
+    quantity_change: Mapped[int] = mapped_column(Integer, nullable=False)  # -2 for sale, +10 for purchase
+    balance_after: Mapped[int] = mapped_column(Integer, nullable=False)    # New stock level after change
+
+    reference_type: Mapped[str | None] = mapped_column(String(50), nullable=True)  # e.g., "SALE"
+    reference_id: Mapped[int | None] = mapped_column(Integer, nullable=True)        # Invoice ID
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
+```
+> **Why**:
+> - Provides an unalterable audit ledger of inventory. Every change (sales, returns, supplier orders) is recorded with `balance_after`, enabling shop owners to trace any stock discrepancy back to the exact timestamp and transaction.
+
+---
+
+#### 3. File Updated: `backend/app/models/__init__.py`
+Registered `Sale`, `SaleItem`, `PaymentMethod`, `StockMovement`, and `StockMovementType`:
+```python
+from app.models.base import TimestampMixin
+from app.models.user import User, UserRole
+from app.models.spare_part import SparePart
+from app.models.sale import Sale, SaleItem, PaymentMethod
+from app.models.stock_movement import StockMovement, StockMovementType
+
+__all__ = [
+    "TimestampMixin",
+    "User",
+    "UserRole",
+    "SparePart",
+    "Sale",
+    "SaleItem",
+    "PaymentMethod",
+    "StockMovement",
+    "StockMovementType",
+]
+```
+
+---
+
+#### 4. Migration Generated & Applied: `f8446218d474_create_sales_and_stock_movements_tables.py`
+```powershell
+docker compose exec backend alembic revision --autogenerate -m "create sales and stock_movements tables"
+docker compose exec backend alembic upgrade head
+```
+> Creates `sales`, `sale_items`, and `stock_movements` tables and foreign keys in PostgreSQL.
+
+---
+
+#### 5. File Created: `backend/app/schemas/billing.py`
+```python
+from datetime import datetime
+from decimal import Decimal
+from pydantic import BaseModel, ConfigDict
+from app.models.sale import PaymentMethod
+
+
+# 1. Single Item in Customer's Shopping Cart
+class CartItemInput(BaseModel):
+    spare_part_id: int
+    quantity: int
+    discount_percent: Decimal = Decimal("0.00")  # Optional item-level discount
+
+
+# 2. Checkout Payload (Sent from POS Counter)
+class CheckoutRequest(BaseModel):
+    customer_name: str | None = None
+    customer_phone: str | None = None
+    payment_method: PaymentMethod = PaymentMethod.CASH
+    items: list[CartItemInput]
+
+
+# 3. Line Item in the Invoice Response
+class SaleItemResponse(BaseModel):
+    id: int
+    spare_part_id: int
+    quantity: int
+    unit_price: Decimal
+    discount_percent: Decimal
+    total_price: Decimal
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# 4. Complete Invoice Receipt Response (For Display & Printing)
+class InvoiceResponse(BaseModel):
+    id: int
+    invoice_number: str
+    customer_name: str | None
+    customer_phone: str | None
+    cashier_id: int
+    subtotal: Decimal
+    discount_amount: Decimal
+    tax_amount: Decimal  # GST
+    grand_total: Decimal
+    payment_method: PaymentMethod
+    created_at: datetime
+    items: list[SaleItemResponse]
+
+    model_config = ConfigDict(from_attributes=True)
+```
+> **Why**:
+> - Separates the incoming counter cart input (`CheckoutRequest`) from the final rendered invoice receipt (`InvoiceResponse`).
+> - Uses `from_attributes=True` to smoothly serialize async SQLAlchemy models with nested `SaleItem` relationships.
+
+---
+
+#### 6. File Created: `backend/app/services/billing_service.py`
+```python
+import random
+from datetime import datetime, timezone
+from decimal import Decimal
+from fastapi import HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.spare_part import SparePart
+from app.models.sale import Sale, SaleItem
+from app.models.stock_movement import StockMovement, StockMovementType
+from app.schemas.billing import CheckoutRequest
+
+
+class BillingService:
+    """
+    Core POS Checkout Engine:
+    Handles atomic billing transactions, row-level locking, stock decrements,
+    and audit ledger logging.
+    """
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    def _generate_invoice_number(self) -> str:
+        """Generates a unique invoice identifier like INV-20261125-142500-842."""
+        now_str = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        rand_suffix = random.randint(100, 999)
+        return f"INV-{now_str}-{rand_suffix}"
+
+    async def process_checkout(self, checkout_data: CheckoutRequest, cashier_id: int) -> Sale:
+        """
+        Executes an atomic checkout:
+        1. Locks matching rows in spare_parts with SELECT ... FOR UPDATE.
+        2. Validates available stock for all items.
+        3. Decrements stock and logs immutable StockMovement ledger entries.
+        4. Calculates subtotal, discounts, 18% GST tax, and grand total.
+        5. Commits the entire transaction or rolls back completely if anything fails.
+        """
+        if not checkout_data.items:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Checkout cart cannot be empty.",
+            )
+
+        invoice_number = self._generate_invoice_number()
+        sale_items: list[SaleItem] = []
+
+        total_subtotal = Decimal("0.00")
+        total_discount = Decimal("0.00")
+
+        # Process each cart item under row-level database locks
+        for item in checkout_data.items:
+            if item.quantity <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Item quantity must be greater than 0.",
+                )
+
+            # ROW-LEVEL LOCK: with_for_update() locks this specific row in PostgreSQL!
+            # If another counter cashier tries to sell this same part right now,
+            # PostgreSQL makes them wait until this transaction completes.
+            stmt = select(SparePart).where(SparePart.id == item.spare_part_id).with_for_update()
+            result = await self.db.execute(stmt)
+            part = result.scalar_one_or_none()
+
+            if not part:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Spare part ID {item.spare_part_id} does not exist.",
+                )
+
+            # Strict stock availability check
+            if part.quantity < item.quantity:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Insufficient stock for '{part.item_name}' (Part #{part.part_number}). "
+                        f"Requested: {item.quantity}, Available: {part.quantity}."
+                    ),
+                )
+
+            # Decrement physical stock on hand
+            part.quantity -= item.quantity
+
+            # Calculate line pricing & discounts
+            line_subtotal = part.selling_price * item.quantity
+            line_discount = line_subtotal * (item.discount_percent / Decimal("100.00"))
+            line_total = line_subtotal - line_discount
+
+            total_subtotal += line_subtotal
+            total_discount += line_discount
+
+            # Create line item
+            sale_item = SaleItem(
+                spare_part_id=part.id,
+                quantity=item.quantity,
+                unit_price=part.selling_price,
+                discount_percent=item.discount_percent,
+                total_price=line_total,
+            )
+            sale_items.append(sale_item)
+
+            # Record immutable audit ledger entry
+            movement = StockMovement(
+                spare_part_id=part.id,
+                movement_type=StockMovementType.SALE_OUT,
+                quantity_change=-item.quantity,
+                balance_after=part.quantity,
+                reference_type="SALE",
+            )
+            self.db.add(movement)
+
+        # Calculate 18% GST Tax on taxable amount
+        taxable_amount = total_subtotal - total_discount
+        tax_amount = round(taxable_amount * Decimal("0.18"), 2)
+        grand_total = taxable_amount + tax_amount
+
+        # Create master Sale record
+        sale = Sale(
+            invoice_number=invoice_number,
+            customer_name=checkout_data.customer_name,
+            customer_phone=checkout_data.customer_phone,
+            cashier_id=cashier_id,
+            subtotal=total_subtotal,
+            discount_amount=total_discount,
+            tax_amount=tax_amount,
+            grand_total=grand_total,
+            payment_method=checkout_data.payment_method,
+            items=sale_items,
+        )
+
+        self.db.add(sale)
+
+        # COMMIT EVERYTHING ATOMICALLY!
+        # If any part failed above, PostgreSQL commits nothing.
+        await self.db.commit()
+        await self.db.refresh(sale)
+
+        # Return with line items loaded
+        return await self.get_invoice_by_id(sale.id)
+
+    async def get_invoice_by_id(self, invoice_id: int) -> Sale:
+        """Fetch an invoice and eagerly load all its line items."""
+        stmt = (
+            select(Sale)
+            .options(selectinload(Sale.items))  # Eagerly loads items in async
+            .where(Sale.id == invoice_id)
+        )
+        result = await self.db.execute(stmt)
+        sale = result.scalar_one_or_none()
+
+        if not sale:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Invoice #{invoice_id} not found.",
+            )
+        return sale
+```
+> **Why**:
+> - `with_for_update()`: Locks the spare parts table rows at PostgreSQL database level. Prevents inventory negative balance / overselling race conditions when multiple cashiers check out simultaneously.
+> - `selectinload(Sale.items)`: Eagerly fetches line items in a non-blocking asynchronous manner to avoid `MissingGreenlet` errors in SQLAlchemy 2.0 Async.
+
+---
+
+#### 7. File Created: `backend/app/api/v1/endpoints/billing.py`
+```python
+from typing import Annotated
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.models.user import User
+from app.schemas.billing import CheckoutRequest, InvoiceResponse
+from app.services.billing_service import BillingService
+from app.api.deps import get_current_user
+
+router = APIRouter(prefix="/billing", tags=["POS Counter Billing"])
+
+
+# 1. POS Checkout Endpoint
+@router.post("/checkout", response_model=InvoiceResponse, status_code=status.HTTP_201_CREATED)
+async def checkout(
+    checkout_data: CheckoutRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """
+    Process counter checkout:
+    - Atomically decrements stock using row-level locking.
+    - Records immutable stock audit ledger entries.
+    - Computes 18% GST tax and discounts.
+    - Generates invoice receipt.
+    """
+    service = BillingService(db)
+    return await service.process_checkout(checkout_data, cashier_id=current_user.id)
+
+
+# 2. View Invoice Receipt by ID
+@router.get("/invoices/{invoice_id}", response_model=InvoiceResponse)
+async def get_invoice(
+    invoice_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Fetch complete invoice details with all line items for receipt printing."""
+    service = BillingService(db)
+    return await service.get_invoice_by_id(invoice_id)
+```
+
+---
+
+#### 8. File Updated: `backend/app/api/v1/router.py`
+```python
+from fastapi import APIRouter
+from app.api.v1.endpoints import auth, spare_parts, billing
+
+api_router = APIRouter()
+
+# Register Authentication endpoints under /api/v1/auth
+api_router.include_router(auth.router)
+
+# Register Spare Parts endpoints under /api/v1/parts
+api_router.include_router(spare_parts.router)
+
+# Register Billing & Checkout endpoints under /api/v1/billing
+api_router.include_router(billing.router)
+```
+
+---
+
+### Milestone 6: Excel Bulk Imports & Business Reporting
+- **Status**: `In Progress`
+- **Objective**: Provide shop owners with Excel spreadsheet bulk imports (`.xlsx`) for instant catalog onboarding, and generate business analytics (daily counter sales, revenue totals, top-selling parts, and low-stock alerts).
+
+---
+
 ### Planned Milestones:
 
-- **Milestone 5: Atomic POS Billing Engine**
-- **Milestone 6: Excel Bulk Imports & Business Reporting**
 - **Milestone 7: Docker Containerization & Next.js Integration**

@@ -143,6 +143,51 @@ Stores the inventory catalog, pricing tiers, barcodes, and bin/rack locations.
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Record creation timestamp (UTC) |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Automatic update timestamp (UTC) |
 
+### 3.3 `sales` Table
+Stores POS counter sales invoices, cashier details, tax breakdown, and payment methods.
+
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | `PRIMARY KEY`, `AUTO_INCREMENT` | Unique sale identifier |
+| `invoice_number` | `VARCHAR(50)` | `UNIQUE`, `NOT NULL`, `INDEXED` | Unique invoice code (e.g. `INV-20261124-001`) |
+| `customer_name` | `VARCHAR(100)` | `NULLABLE` | Walk-in or counter customer name |
+| `customer_phone` | `VARCHAR(20)` | `NULLABLE` | Customer mobile number |
+| `cashier_id` | `INTEGER` | `NOT NULL`, `FK -> users.id` | Staff member who processed the transaction |
+| `subtotal` | `NUMERIC(10, 2)` | `NOT NULL` | Total before tax and discounts |
+| `discount_amount`| `NUMERIC(10, 2)` | `NOT NULL`, Default: `0.00` | Total discount applied |
+| `tax_amount` | `NUMERIC(10, 2)` | `NOT NULL`, Default: `0.00` | Calculated GST amount (CGST + SGST) |
+| `grand_total` | `NUMERIC(10, 2)` | `NOT NULL` | Final billed amount paid by customer |
+| `payment_method` | `VARCHAR(20)` | `NOT NULL`, Default: `'CASH'` | `CASH`, `CARD`, `UPI`, `CREDIT` |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Checkout timestamp (UTC) |
+| `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
+
+### 3.4 `sale_items` Table
+Line items inside a sales invoice.
+
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | `PRIMARY KEY`, `AUTO_INCREMENT` | Unique line item ID |
+| `sale_id` | `INTEGER` | `NOT NULL`, `FK -> sales.id` | Parent invoice ID |
+| `spare_part_id` | `INTEGER` | `NOT NULL`, `FK -> spare_parts.id` | Part that was sold |
+| `quantity` | `INTEGER` | `NOT NULL` | Number of units sold |
+| `unit_price` | `NUMERIC(10, 2)` | `NOT NULL` | Unit price at time of sale |
+| `discount_percent` | `NUMERIC(5, 2)` | `NOT NULL`, Default: `0.00` | Discount applied to item |
+| `total_price` | `NUMERIC(10, 2)` | `NOT NULL` | Final line total: `(unit_price * qty) - discount` |
+
+### 3.5 `stock_movements` Table (Immutable Audit Ledger)
+Audit trail tracking every single inventory increment or decrement.
+
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | `PRIMARY KEY`, `AUTO_INCREMENT` | Unique ledger event ID |
+| `spare_part_id` | `INTEGER` | `NOT NULL`, `FK -> spare_parts.id` | Item being adjusted |
+| `movement_type` | `VARCHAR(20)` | `NOT NULL` | `SALE_OUT`, `PURCHASE_IN`, `RETURN_IN`, `ADJUSTMENT` |
+| `quantity_change` | `INTEGER` | `NOT NULL` | Change amount (negative for sales, positive for restock) |
+| `balance_after` | `INTEGER` | `NOT NULL` | Resulting inventory balance |
+| `reference_type` | `VARCHAR(50)` | `NULLABLE` | `SALE`, `PURCHASE`, `DAMAGE` |
+| `reference_id` | `INTEGER` | `NULLABLE` | Foreign invoice or PO reference number |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp when movement took place |
+
 ---
 
 ## 4. Indexing & Optimization Strategy

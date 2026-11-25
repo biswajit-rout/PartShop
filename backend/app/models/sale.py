@@ -1,0 +1,70 @@
+import enum
+from decimal import Decimal
+from sqlalchemy import String, Integer, Numeric, ForeignKey, Enum
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from app.core.database import Base
+from app.models.base import TimestampMixin
+
+
+class PaymentMethod(str, enum.Enum):
+    """Payment channels supported at the counter."""
+    CASH = "CASH"
+    CARD = "CARD"
+    UPI = "UPI"
+    CREDIT = "CREDIT"
+
+
+class Sale(Base, TimestampMixin):
+    """Customer sales invoice record."""
+    __tablename__ = "sales"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    invoice_number: Mapped[str] = mapped_column(
+        String(50), unique=True, index=True, nullable=False)
+
+    customer_name: Mapped[str | None] = mapped_column(
+        String(100), nullable=True)
+    customer_phone: Mapped[str | None] = mapped_column(
+        String(20), nullable=True)
+
+    # Staff member who handled this checkout
+    cashier_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False)
+
+    # Financial Breakdown
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    discount_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), default=Decimal("0.00"), nullable=False)
+    tax_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), default=Decimal("0.00"), nullable=False)  # GST
+    grand_total: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), nullable=False)
+
+    payment_method: Mapped[PaymentMethod] = mapped_column(
+        Enum(PaymentMethod), default=PaymentMethod.CASH, nullable=False
+    )
+
+    # Relationships
+    items: Mapped[list["SaleItem"]] = relationship(
+        "SaleItem", back_populates="sale", cascade="all, delete-orphan")
+
+
+class SaleItem(Base):
+    """Individual line item sold within an invoice."""
+    __tablename__ = "sale_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    sale_id: Mapped[int] = mapped_column(
+        ForeignKey("sales.id"), nullable=False)
+    spare_part_id: Mapped[int] = mapped_column(
+        ForeignKey("spare_parts.id"), nullable=False)
+
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    discount_percent: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), default=Decimal("0.00"), nullable=False)
+    total_price: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), nullable=False)
+
+    # Relationship back to parent invoice
+    sale: Mapped["Sale"] = relationship("Sale", back_populates="items")

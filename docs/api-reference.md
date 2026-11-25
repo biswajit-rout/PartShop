@@ -195,3 +195,79 @@ Instant `< 5ms` query by barcode scanned at POS counter.
 - **Error Codes**:
   - `404 Not Found`: No item matching scanned barcode.
 
+---
+
+## 4. POS Counter Billing & Invoices (`/api/v1/billing`)
+
+### 4.1 Process Counter Checkout
+Executes an atomic checkout transaction: validates physical stock under row-level database locks (`SELECT ... FOR UPDATE`), decrements available inventory, logs immutable entries to the `stock_movements` audit ledger, computes line discounts and 18% GST tax, and issues a final sales invoice.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/billing/checkout`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Any authenticated cashier or manager)
+- **Request Body (`CheckoutRequest`)**:
+  ```json
+  {
+    "customer_name": "Ramesh Kumar",
+    "customer_phone": "9876543210",
+    "payment_method": "CASH",
+    "items": [
+      {
+        "spare_part_id": 1,
+        "quantity": 2,
+        "discount_percent": "5.00"
+      }
+    ]
+  }
+  ```
+- **Validation Rules**:
+  - `items`: Must contain at least 1 item (`HTTP 400` if empty).
+  - `quantity`: Must be greater than 0.
+  - `discount_percent`: Optional percentage discount per line item (default: `0.00`).
+  - `payment_method`: One of `CASH`, `CARD`, `UPI`, `CREDIT`.
+- **Response (`201 Created`)**:
+  ```json
+  {
+    "id": 1,
+    "invoice_number": "INV-20261125-142500-842",
+    "customer_name": "Ramesh Kumar",
+    "customer_phone": "9876543210",
+    "cashier_id": 1,
+    "subtotal": "900.00",
+    "discount_amount": "45.00",
+    "tax_amount": "153.90",
+    "grand_total": "1008.90",
+    "payment_method": "CASH",
+    "created_at": "2026-11-25T14:25:00Z",
+    "items": [
+      {
+        "id": 1,
+        "spare_part_id": 1,
+        "quantity": 2,
+        "unit_price": "450.00",
+        "discount_percent": "5.00",
+        "total_price": "855.00"
+      }
+    ]
+  }
+  ```
+- **Error Codes**:
+  - `400 Bad Request`: Cart is empty, quantity <= 0, or insufficient stock available for a requested part.
+  - `404 Not Found`: Spare part ID does not exist.
+  - `401 Unauthorized`: Missing or invalid cashier JWT token.
+
+---
+
+### 4.2 Get Invoice Receipt by ID
+Fetches complete invoice details, tax breakdown, and all line items for display or physical thermal receipt printing.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/billing/invoices/{invoice_id}`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Path Parameters**:
+  - `invoice_id` (integer, required): Unique identifier of the invoice.
+- **Response (`200 OK`)**: Same schema as `InvoiceResponse`.
+- **Error Codes**:
+  - `404 Not Found`: Invoice not found.
+  - `401 Unauthorized`: Missing or invalid JWT token.
+
