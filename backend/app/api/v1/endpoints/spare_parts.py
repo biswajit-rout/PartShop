@@ -18,11 +18,19 @@ router = APIRouter(prefix="/parts", tags=["Spare Parts Catalog"])
 
 # 1. Create a New Spare Part (Admin & Store Manager only)
 @router.post(
+    "",
+    response_model=SparePartResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_role(
+        [UserRole.ADMIN, UserRole.STORE_MANAGER]))],
+)
+@router.post(
     "/",
     response_model=SparePartResponse,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_role(
         [UserRole.ADMIN, UserRole.STORE_MANAGER]))],
+    include_in_schema=False,
 )
 async def create_spare_part(
     part_in: SparePartCreate,
@@ -34,7 +42,8 @@ async def create_spare_part(
 
 
 # 2. Search & List Spare Parts (All Authenticated Staff)
-@router.get("/", response_model=PaginatedSpareParts)
+@router.get("", response_model=PaginatedSpareParts)
+@router.get("/", response_model=PaginatedSpareParts, include_in_schema=False)
 async def list_spare_parts(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -45,7 +54,7 @@ async def list_spare_parts(
     low_stock_only: bool = Query(
         False, description="Filter only items below min stock threshold"),
     skip: int = Query(0, ge=0, description="Pagination offset"),
-    limit: int = Query(50, ge=1, le=100, description="Page size limit"),
+    limit: int = Query(50, ge=1, le=500, description="Page size limit"),
 ):
     """Search and browse spare parts with pagination and filters."""
     service = InventoryService(db)
@@ -88,18 +97,18 @@ async def get_spare_part(
     return await service.get_part_by_id(part_id)
 
 
-# 5. Update Spare Part (Admin & Store Manager only)
+# 5. Update Spare Part (Admin, Store Manager & Counter Staff)
 @router.put(
     "/{part_id}",
     response_model=SparePartResponse,
     dependencies=[Depends(require_role(
-        [UserRole.ADMIN, UserRole.STORE_MANAGER]))],
+        [UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
 )
 async def update_spare_part(
     part_id: int,
     part_update: SparePartUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Update spare part details, pricing, or rack location."""
+    """Update spare part details, pricing, stock levels, or rack location."""
     service = InventoryService(db)
     return await service.update_part(part_id, part_update)

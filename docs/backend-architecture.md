@@ -84,7 +84,7 @@ This tracker tracks our step-by-step progress. Each milestone builds directly on
 | **Milestone 4** | **Clean Architecture & Spare Parts Catalog** | Implement the Repository Pattern and Service Layer for Spare Parts. Search by bike model, barcode, part number with pagination. | `Completed` |
 | **Milestone 5** | **Atomic POS Billing Engine** | Implement atomic transactions with row-level locking (`SELECT ... FOR UPDATE`), stock decrementing, GST calculation, and mechanic commissions. | `Completed` |
 | **Milestone 6** | **Excel Bulk Import & Reports** | Parse and validate `.xlsx` catalogs with bulk database inserts. Daily sales summaries and profit margin reports. | `Completed` |
-| **Milestone 7** | **Docker Containerization & Frontend Link** | Create `backend/Dockerfile`, connect the backend container to `docker-compose.yml`, and test end-to-end communication with the Next.js UI. | `In Progress` |
+| **Milestone 7** | **Docker Containerization & Frontend Link** | Create `backend/Dockerfile`, connect the backend container to `docker-compose.yml`, and test end-to-end communication with the Next.js UI. | `Completed` |
 
 ---
 
@@ -131,15 +131,15 @@ This tracker tracks our step-by-step progress. Each milestone builds directly on
   - How FastAPI Dependency Injection (`Depends(...)`) keeps code clean and modular.
 
 ### Milestone 4: Clean Architecture & Spare Parts Catalog
-- **Goal**: Implement search and stock management using the Repository Pattern.
+- **Goal**: Implement tokenized search and stock management using the Repository Pattern.
 - **Files**:
   - `backend/app/repositories/base.py`: Generic repository for common CRUD operations.
-  - `backend/app/repositories/spare_part_repo.py`: Specialized queries (e.g. search by compatible bike).
+  - `backend/app/repositories/spare_part_repo.py`: Tokenized multi-attribute search engine with automotive synonym dictionary (`filter` ↔ `filt`, `brake` ↔ `brk`, `cushion` ↔ `shock`, etc.) and cross-column SQL `AND` matching.
   - `backend/app/services/inventory_service.py`: Business rules for managing stock.
-  - `backend/app/api/v1/endpoints/spare_parts.py`: REST endpoints.
+  - `backend/app/api/v1/endpoints/spare_parts.py`: REST endpoints supporting multi-token queries up to 500 items per page.
 - **What you'll learn**:
   - Why keeping database queries out of route handlers prevents technical debt.
-  - How to handle pagination and filtering cleanly.
+  - How to handle tokenized multi-field searches and domain synonym expansions without external heavy search clusters.
 
 ### Milestone 5: Atomic POS Billing Engine
 - **Goal**: Build the core financial transaction engine of the spare parts shop.

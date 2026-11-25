@@ -36,12 +36,12 @@ The following matrix documents the exact versions, libraries, and integration me
 | **Bundler Mode** | Next.js Webpack engine (`--webpack`) | Turbopack / Default | **Implemented** (ensures Windows IPC stability) |
 | **Icons** | `lucide-react` 1.76.0 | Not specified | **Implemented** |
 | **Charts & Analytics**| `recharts` 3.11.0 | Not specified | **Implemented** |
-| **State Management** | React Local State (`useState`, `useEffect`) | TanStack / React Query | **Architectural Gap**: TanStack Query not yet installed |
-| **API Client** | Native Mock Data layer | Axios | **Architectural Gap**: Axios not yet installed |
+| **State Management** | React Local State (`useState`, `useEffect`) | TanStack / React Query | **Architectural Choice**: Native state + Modular API layer |
+| **API Client** | Modular Domain API Client (`src/api/`) | Axios | **Implemented**: Native `fetch` with modular domain services |
 | **Component Primitives**| Custom Atomic Liquid Glass Primitives | ShadCN UI Components | **Substituted**: Tailored in-house Liquid Glass suite |
-| **Backend REST API** | None (No server in repository) | FastAPI + Python 3.12 | **Planned / Not Implemented** |
-| **Database** | None (In-memory mock records) | PostgreSQL + SQLAlchemy + Alembic | **Planned / Not Implemented** |
-| **Authentication** | Hardcoded Admin profile mock | JWT + RBAC | **Planned / Not Implemented** |
+| **Backend REST API** | FastAPI Python REST API (Port 8001) | FastAPI + Python 3.12 | **Implemented** |
+| **Database** | PostgreSQL 16 (Docker) + SQLAlchemy 2.0 Async + Alembic | PostgreSQL + SQLAlchemy + Alembic | **Implemented** |
+| **Authentication** | JWT Token + Role-Based Guards (`ADMIN`, `STAFF`) | JWT + RBAC | **Implemented** |
 
 ---
 
@@ -93,10 +93,10 @@ flowchart TD
         end
     end
 
-    subgraph PlannedBackend["Planned Backend Infrastructure (requirements.md)"]
-        FastAPI["FastAPI Python REST API (Not Yet Created)"]
-        PostgreSQL["PostgreSQL 16 Database (Not Yet Created)"]
-        StorageEngine["Local / S3 Storage (Not Yet Created)"]
+    subgraph LiveBackend["Live Backend Infrastructure (Docker Container Fleet)"]
+        FastAPI["FastAPI Python REST API (/api/v1/* on Host Port 8001)"]
+        PostgreSQL["PostgreSQL 16 Database (partshop-postgres:5432)"]
+        StorageEngine["PostgreSQL + Docker Volumes (partshop-pgdata)"]
     end
 
     DOM <--> RootPage

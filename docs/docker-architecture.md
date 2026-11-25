@@ -132,6 +132,8 @@ flowchart LR
 ### 4.1 Service: `frontend`
 - **Build Context**: `./frontend`
 - **Dockerfile**: `./frontend/Dockerfile`
+- **Build Arguments**:
+  - `NEXT_PUBLIC_API_URL`: `${NEXT_PUBLIC_API_URL:-http://localhost:8001/api/v1}` (inlined into Next.js client bundles at build time)
 - **Internal Port**: `3000`
 - **Host Port**: `${FRONTEND_PORT:-3000}`
 - **Restart Policy**: `unless-stopped`
@@ -140,7 +142,7 @@ flowchart LR
   - `NODE_ENV`: `production`
   - `PORT`: `3000`
   - `HOSTNAME`: `0.0.0.0`
-  - `NEXT_PUBLIC_API_URL`: `${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}`
+  - `NEXT_PUBLIC_API_URL`: `${NEXT_PUBLIC_API_URL:-http://localhost:8001/api/v1}`
 
 ### 4.2 Service: `postgres`
 - **Image**: `postgres:16-alpine`
@@ -223,10 +225,10 @@ docker compose logs -f
 docker compose logs -f frontend
 ```
 
-### 6.5 Launching with Future Backend Code
-Once backend code is added to `./backend/`:
+### 6.5 Rebuilding Frontend After Code Edits
+Unlike the backend service which uses a live volume mount (`./backend:/app`) with Uvicorn hot-reloading, the frontend runs an optimized production standalone Node.js runner. When frontend React components or Next.js code are modified, rebuild and recreate the container:
 ```powershell
-docker compose --profile full up --build -d
+docker compose up -d --build frontend
 ```
 
 ### 6.6 Clean Teardown

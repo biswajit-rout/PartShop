@@ -16,6 +16,7 @@ class CheckoutRequest(BaseModel):
     customer_name: str | None = None
     customer_phone: str | None = None
     payment_method: PaymentMethod = PaymentMethod.CASH
+    mechanic_id: int | None = None  # Optional mechanic referring or purchasing part
     items: list[CartItemInput]
 
 
@@ -23,6 +24,9 @@ class CheckoutRequest(BaseModel):
 class SaleItemResponse(BaseModel):
     id: int
     spare_part_id: int
+    mechanic_id: int | None = None
+    commission_percentage: Decimal = Decimal("0.00")
+    commission_amount: Decimal = Decimal("0.00")
     quantity: int
     unit_price: Decimal
     discount_percent: Decimal
@@ -38,6 +42,7 @@ class InvoiceResponse(BaseModel):
     customer_name: str | None
     customer_phone: str | None
     cashier_id: int
+    mechanic_id: int | None = None
     subtotal: Decimal
     discount_amount: Decimal
     tax_amount: Decimal  # GST

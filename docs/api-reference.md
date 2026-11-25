@@ -143,41 +143,41 @@ Adds a new item to the shop inventory with pricing and barcode.
 ---
 
 ### 3.2 Search & List Spare Parts
-Fast paginated catalog search by item name, part number, compatible motorcycle model, or brand.
+Fast paginated catalog search by item name, part number, compatible motorcycle model, brand, or barcode. Uses an intelligent tokenized search engine with automotive abbreviations/synonym expansion (`filter`/`filt`, `brake`/`brk`/`pad`/`shoe`, `cushion`/`shock`/`damper`, `clutch`/`clt`, etc.).
 
 - **Method**: `GET`
-- **Route**: `/api/v1/parts/`
+- **Route**: `/api/v1/parts/` or `/api/v1/parts`
 - **Authentication**: `Bearer <JWT_TOKEN>`
 - **Query Parameters**:
-  - `q` (string, optional): Full-text search term across item name, part number, and bike model.
-  - `brand` (string, optional): Filter by brand (e.g. `Hero`, `Bajaj`).
+  - `q` (string, optional): Multi-token search query across all part attributes (e.g., `"Bajaj pulsar Air filter"`, `"Activa brake"`, `"Splendor clutch"`). Splits into whitespace-separated tokens and requires all tokens to be satisfied across any part field with synonym expansion.
+  - `brand` (string, optional): Filter by brand (e.g. `Hero`, `Bajaj`, `Honda`).
   - `low_stock_only` (boolean, optional, default: `false`): Filter items where `quantity <= min_stock_alert`.
   - `skip` (integer, default: `0`): Pagination offset.
-  - `limit` (integer, default: `50`, max: `100`): Page size.
+  - `limit` (integer, default: `50`, max: `500`): Page size.
 - **Response (`200 OK`)**:
   ```json
   {
-    "total": 1,
+    "total": 2,
     "skip": 0,
     "limit": 50,
     "items": [
       {
-        "id": 1,
-        "item_name": "Front Disc Brake Pad",
-        "brand_name": "Bosch",
-        "part_number": "BP-4029-FR",
-        "model_number": "Pulsar 220 / Apache RTR",
-        "compatible_bikes": "Bajaj Pulsar 220, TVS Apache RTR 160/180",
-        "quantity": 25,
+        "id": 65,
+        "item_name": "KIT ELEMENT AIR FILT/81",
+        "brand_name": "OEM Genuine",
+        "part_number": "36DK0015",
+        "model_number": null,
+        "compatible_bikes": "Bajaj Pulsar 150",
+        "quantity": 1,
         "min_stock_alert": 5,
-        "rack_number": "Rack-B3",
-        "purchase_price": "280.00",
-        "selling_price": "450.00",
-        "customer_discount": "5.00",
-        "mechanic_discount": "12.00",
-        "barcode": "8901234567890",
-        "created_at": "2026-11-23T18:00:00Z",
-        "updated_at": "2026-11-23T18:00:00Z"
+        "rack_number": null,
+        "purchase_price": "430.11",
+        "selling_price": "531.00",
+        "customer_discount": "0.00",
+        "mechanic_discount": "0.00",
+        "barcode": null,
+        "created_at": "2026-11-25T20:10:43.158105Z",
+        "updated_at": "2026-11-25T20:10:43.158116Z"
       }
     ]
   }
@@ -194,6 +194,25 @@ Instant `< 5ms` query by barcode scanned at POS counter.
 - **Response (`200 OK`)**: Single `SparePartResponse` object.
 - **Error Codes**:
   - `404 Not Found`: No item matching scanned barcode.
+
+---
+
+### 3.4 Update Spare Part Details & Stock Pricing
+Updates existing spare part attributes, price tiers, physical stock level, rack location, or barcode. Manual quantity adjustments automatically record an immutable `ADJUSTMENT` entry in the `stock_movements` ledger.
+
+- **Method**: `PUT`
+- **Route**: `/api/v1/parts/{part_id}`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SparePartUpdate`)**:
+  ```json
+  {
+    "item_name": "Front Disc Brake Pad (Updated)",
+    "selling_price": "475.00",
+    "quantity": 25,
+    "rack_number": "Rack-A3"
+  }
+  ```
+- **Response (`200 OK`)**: Updated `SparePartResponse` object.
 
 ---
 
@@ -407,8 +426,167 @@ Retrieves all spare parts whose stock on hand has dropped to or below their conf
       "part_number": "SP-NGK-CPR8",
       "rack_number": "Rack-A2",
       "quantity": 2,
-      "min_stock_alert": 10
+---
+
+## 7. Item Brands Master API (`/api/v1/brands`)
+
+### 7.1 List All Brands
+Retrieves all active spare part brands/manufacturers.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/brands`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "id": 1,
+      "name": "Hero",
+      "code": "HERO",
+      "description": "Hero MotoCorp OEM & Genuine Spares",
+      "created_at": "2026-11-25T19:27:37Z",
+      "updated_at": "2026-11-25T19:27:37Z"
     }
   ]
   ```
+
+### 7.2 Create New Brand
+Registers a new brand/manufacturer.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/brands`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Request Body (`BrandCreate`)**:
+  ```json
+  {
+    "name": "Brembo",
+    "code": "BREM",
+    "description": "High Performance Brake Systems"
+  }
+  ```
+- **Response (`201 Created`)**: `BrandResponse` object.
+
+---
+
+## 8. Mechanics & Commission Matrix API (`/api/v1/mechanics`)
+
+### 8.1 List All Mechanics
+Retrieves all mechanic partners with their default commission and brand-specific override matrix.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/mechanics`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Query Parameters**:
+  - `active_only` (optional, boolean): Filter only active mechanics.
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "id": 1,
+      "name": "Ramesh Sharma",
+      "phone": "+91 98765 43210",
+      "garage_name": "Ramesh Auto Care",
+      "address": "Shop 4, Main Market, Station Road",
+      "default_commission_percentage": "5.00",
+      "is_active": true,
+      "created_at": "2026-11-25T19:27:37Z",
+      "updated_at": "2026-11-25T19:27:37Z",
+      "brand_commissions": [
+        {
+          "id": 1,
+          "mechanic_id": 1,
+          "brand_id": 1,
+          "brand_name": "Hero",
+          "commission_percentage": "8.00"
+        },
+        {
+          "id": 2,
+          "mechanic_id": 1,
+          "brand_id": 2,
+          "brand_name": "Bajaj",
+          "commission_percentage": "10.00"
+        }
+      ]
+    }
+  ]
+  ```
+
+### 8.2 Create Mechanic Partner
+Registers a new mechanic partner with custom brand commission rates.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/mechanics`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Request Body (`MechanicCreate`)**:
+  ```json
+  {
+    "name": "Ramesh Sharma",
+    "phone": "+91 98765 43210",
+    "garage_name": "Ramesh Auto Care",
+    "address": "Shop 4, Station Road",
+    "default_commission_percentage": "5.00",
+    "commissions": [
+      {
+        "brand_id": 1,
+        "commission_percentage": "8.00"
+      }
+    ]
+  }
+  ```
+- **Response (`201 Created`)**: `MechanicResponse` object.
+
+### 8.3 Get Date-Wise Items Taken by Mechanic
+Returns a chronological audit ledger of all spare parts taken or sold by this mechanic, showing invoice #, part details, commission %, and commission payout amount.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/mechanics/{mechanic_id}/items`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Query Parameters**:
+  - `start_date` (optional, date string `YYYY-MM-DD`)
+  - `end_date` (optional, date string `YYYY-MM-DD`)
+  - `skip` (optional, default: 0)
+  - `limit` (optional, default: 100)
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "sale_id": 3,
+      "invoice_number": "INV-20261125-193030-328",
+      "date": "2026-11-25T19:30:30Z",
+      "spare_part_id": 1,
+      "item_name": "Front Disc Brake Pad",
+      "part_number": "BP-101",
+      "brand_name": "Hero",
+      "quantity": 1,
+      "unit_price": "450.00",
+      "total_price": "450.00",
+      "commission_percentage": "8.00",
+      "commission_amount": "36.00",
+      "customer_name": "Rohan Verma",
+      "customer_phone": "9811223344"
+    }
+  ]
+  ```
+
+### 8.4 Get Mechanic Performance Summary
+Calculates aggregate KPI totals: parts count, sales volume, and total commission earned.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/mechanics/{mechanic_id}/summary`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Query Parameters**:
+  - `start_date` (optional, date string `YYYY-MM-DD`)
+  - `end_date` (optional, date string `YYYY-MM-DD`)
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "mechanic_id": 1,
+    "mechanic_name": "Ramesh Sharma",
+    "garage_name": "Ramesh Auto Care",
+    "total_items_taken": 1,
+    "total_sales_volume": "450.00",
+    "total_commission_earned": "36.00"
+  }
+  ```
+
 

@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, spare_parts, billing, imports, reports
+from app.api.v1.endpoints import auth, spare_parts, billing, imports, reports, brands, mechanics
 
 api_router = APIRouter()
 
@@ -17,3 +17,9 @@ api_router.include_router(imports.router)
 
 # Register Business Analytics Reports endpoints under /api/v1/reports
 api_router.include_router(reports.router)
+
+# Register Brands endpoints under /api/v1/brands
+api_router.include_router(brands.router)
+
+# Register Mechanics & Commission endpoints under /api/v1/mechanics
+api_router.include_router(mechanics.router)

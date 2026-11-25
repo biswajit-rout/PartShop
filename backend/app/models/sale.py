@@ -1,9 +1,14 @@
 import enum
 from decimal import Decimal
+from typing import TYPE_CHECKING
 from sqlalchemy import String, Integer, Numeric, ForeignKey, Enum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from app.models.base import TimestampMixin
+
+if TYPE_CHECKING:
+    from app.models.mechanic import Mechanic
+    from app.models.spare_part import SparePart
 
 
 class PaymentMethod(str, enum.Enum):
@@ -31,6 +36,11 @@ class Sale(Base, TimestampMixin):
     cashier_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"), nullable=False)
 
+    # Optional Mechanic Partner who referred / took parts for customer
+    mechanic_id: Mapped[int | None] = mapped_column(
+        ForeignKey("mechanics.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     # Financial Breakdown
     subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     discount_amount: Mapped[Decimal] = mapped_column(
@@ -47,6 +57,7 @@ class Sale(Base, TimestampMixin):
     # Relationships
     items: Mapped[list["SaleItem"]] = relationship(
         "SaleItem", back_populates="sale", cascade="all, delete-orphan")
+    mechanic: Mapped["Mechanic | None"] = relationship("Mechanic", back_populates="sales")
 
 
 class SaleItem(Base):
@@ -59,6 +70,17 @@ class SaleItem(Base):
     spare_part_id: Mapped[int] = mapped_column(
         ForeignKey("spare_parts.id"), nullable=False)
 
+    # Optional mechanic attribution & commission breakdown per line item
+    mechanic_id: Mapped[int | None] = mapped_column(
+        ForeignKey("mechanics.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    commission_percentage: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), default=Decimal("0.00"), nullable=False
+    )
+    commission_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), default=Decimal("0.00"), nullable=False
+    )
+
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     discount_percent: Mapped[Decimal] = mapped_column(
@@ -66,5 +88,6 @@ class SaleItem(Base):
     total_price: Mapped[Decimal] = mapped_column(
         Numeric(10, 2), nullable=False)
 
-    # Relationship back to parent invoice
+    # Relationships
     sale: Mapped["Sale"] = relationship("Sale", back_populates="items")
+    spare_part: Mapped["SparePart"] = relationship("SparePart")

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.spare_part import SparePart
 from app.models.sale import Sale, SaleItem
 from app.models.stock_movement import StockMovement, StockMovementType
+from app.models.mechanic import Mechanic, MechanicBrandCommission
 from app.schemas.billing import CheckoutRequest
 
 
@@ -16,7 +17,7 @@ class BillingService:
     """
     Core POS Checkout Engine:
     Handles atomic billing transactions, row-level locking, stock decrements,
-    and audit ledger logging.
+    mechanic brand commission computations, and audit ledger logging.
     """
 
     def __init__(self, db: AsyncSession):
@@ -33,9 +34,10 @@ class BillingService:
         Executes an atomic checkout:
         1. Locks matching rows in spare_parts with SELECT ... FOR UPDATE.
         2. Validates available stock for all items.
-        3. Decrements stock and logs immutable StockMovement ledger entries.
-        4. Calculates subtotal, discounts, 18% GST tax, and grand total.
-        5. Commits the entire transaction or rolls back completely if anything fails.
+        3. Looks up mechanic and their brand-specific commission percentage matrix.
+        4. Decrements stock and logs immutable StockMovement ledger entries.
+        5. Computes line discounts, 18% GST tax, and grand total.
+        6. Commits transaction atomically.
         """
         if not checkout_data.items:
             raise HTTPException(
@@ -49,19 +51,36 @@ class BillingService:
         total_subtotal = Decimal("0.00")
         total_discount = Decimal("0.00")
 
-        # Process each cart item under row-level database locks
+        # 1. Resolve Mechanic & Brand Commission Matrix (if mechanic assigned)
+        mechanic = None
+        brand_commission_map: dict[str, Decimal] = {}
+        if checkout_data.mechanic_id:
+            mech_stmt = (
+                select(Mechanic)
+                .options(selectinload(Mechanic.brand_commissions).selectinload(MechanicBrandCommission.brand))
+                .where(Mechanic.id == checkout_data.mechanic_id)
+            )
+            mech_res = await self.db.execute(mech_stmt)
+            mechanic = mech_res.scalar_one_or_none()
+            if not mechanic:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Mechanic ID {checkout_data.mechanic_id} not found."
+                )
+            for bc in mechanic.brand_commissions:
+                if bc.brand:
+                    brand_commission_map[bc.brand.name.lower().strip()] = bc.commission_percentage
+
+        # 2. Process each cart item under row-level database locks
         for item in checkout_data.items:
             if item.quantity <= 0:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Item quantity must be greater than 0.",
+                    detail="Item quantity must be greater than 0.",
                 )
 
-            # ROW-LEVEL LOCK: with_for_update() locks this specific row in PostgreSQL!
-            # If another counter cashier tries to sell this same part right now,
-            # PostgreSQL makes them wait until this transaction completes.
-            stmt = select(SparePart).where(SparePart.id ==
-                                           item.spare_part_id).with_for_update()
+            # ROW-LEVEL LOCK: with_for_update() locks this specific row in PostgreSQL
+            stmt = select(SparePart).where(SparePart.id == item.spare_part_id).with_for_update()
             result = await self.db.execute(stmt)
             part = result.scalar_one_or_none()
 
@@ -86,16 +105,29 @@ class BillingService:
 
             # Calculate line pricing & discounts
             line_subtotal = part.selling_price * item.quantity
-            line_discount = line_subtotal * \
-                (item.discount_percent / Decimal("100.00"))
+            line_discount = line_subtotal * (item.discount_percent / Decimal("100.00"))
             line_total = line_subtotal - line_discount
 
             total_subtotal += line_subtotal
             total_discount += line_discount
 
+            # Calculate mechanic commission for this specific item & brand
+            comm_pct = Decimal("0.00")
+            comm_amt = Decimal("0.00")
+            if mechanic:
+                part_brand = (part.brand_name or "").lower().strip()
+                if part_brand in brand_commission_map:
+                    comm_pct = brand_commission_map[part_brand]
+                else:
+                    comm_pct = mechanic.default_commission_percentage
+                comm_amt = round((line_total * comm_pct) / Decimal("100.00"), 2)
+
             # Create line item
             sale_item = SaleItem(
                 spare_part_id=part.id,
+                mechanic_id=mechanic.id if mechanic else None,
+                commission_percentage=comm_pct,
+                commission_amount=comm_amt,
                 quantity=item.quantity,
                 unit_price=part.selling_price,
                 discount_percent=item.discount_percent,
@@ -118,12 +150,13 @@ class BillingService:
         tax_amount = round(taxable_amount * Decimal("0.18"), 2)
         grand_total = taxable_amount + tax_amount
 
-        # Create master Sale record
+        # Create and persist the Sale invoice header
         sale = Sale(
             invoice_number=invoice_number,
             customer_name=checkout_data.customer_name,
             customer_phone=checkout_data.customer_phone,
             cashier_id=cashier_id,
+            mechanic_id=mechanic.id if mechanic else None,
             subtotal=total_subtotal,
             discount_amount=total_discount,
             tax_amount=tax_amount,
@@ -133,25 +166,27 @@ class BillingService:
         )
 
         self.db.add(sale)
-
-        # COMMIT EVERYTHING ATOMICALLY!
-        # If any part failed above, PostgreSQL commits nothing.
         await self.db.commit()
         await self.db.refresh(sale)
 
-        # Return with line items loaded
-        return await self.get_invoice_by_id(sale.id)
+        # Reload with items for response serialization
+        stmt_reload = (
+            select(Sale)
+            .options(selectinload(Sale.items))
+            .where(Sale.id == sale.id)
+        )
+        res_reload = await self.db.execute(stmt_reload)
+        return res_reload.scalar_one()
 
     async def get_invoice_by_id(self, invoice_id: int) -> Sale:
-        """Fetch an invoice and eagerly load all its line items."""
+        """Fetch invoice with line items by ID."""
         stmt = (
             select(Sale)
-            .options(selectinload(Sale.items))  # Eagerly loads items in async
+            .options(selectinload(Sale.items))
             .where(Sale.id == invoice_id)
         )
         result = await self.db.execute(stmt)
         sale = result.scalar_one_or_none()
-
         if not sale:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

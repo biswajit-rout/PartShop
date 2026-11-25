@@ -7,9 +7,49 @@ and follows the governance instructions established in `AGENTS.md`.
 
 ---
 
+## 2026-11-26
+
+### Added
+- `frontend/src/utils/search.ts`: Created tokenized search engine with `matchSearchTokens` and automotive domain synonym/stem expansions (`filter`/`filt`, `brake`/`brk`/`pad`/`shoe`, `cushion`/`shock`/`damper`, `clutch`/`clt`, etc.).
+- `backend/app/models/brand.py`: Created `Brand` model for genuine and aftermarket spares catalog manufacturers.
+- `backend/app/models/mechanic.py`: Created `Mechanic` model and `MechanicBrandCommission` table for per-mechanic, per-brand percentage matrices.
+- `backend/alembic/versions/37e4b7e8a237_create_brands_and_mechanics_tables.py`: Database migration creating `brands`, `mechanics`, `mechanic_brand_commissions` and adding `mechanic_id`, `commission_percentage`, `commission_amount` to `sales` and `sale_items`.
+- `backend/app/schemas/brand.py` & `backend/app/schemas/mechanic.py`: Complete Pydantic v2 schemas for CRUD operations, date-wise item ledgers, and summary performance KPIs.
+- `backend/app/services/brand_service.py` & `backend/app/services/mechanic_service.py`: Business logic layers for brand catalog and mechanic commission calculations.
+- `backend/app/api/v1/endpoints/brands.py` & `backend/app/api/v1/endpoints/mechanics.py`: REST endpoints mounted under `/api/v1/brands` and `/api/v1/mechanics`.
+- `backend/seed_data.py`: Seeded 10 default genuine/aftermarket brands and 3 mechanic partners with configured brand commission override percentages.
+- `frontend/src/api/modules/brands.api.ts` & `frontend/src/api/modules/mechanics.api.ts`: Modular API clients with TypeScript contracts and adapters.
+- `frontend/src/components/views/InventoryView.tsx`: Added Edit Part modal for modifying stock, pricing, and locations, plus Brands Master drawer/modal.
+- `frontend/src/components/views/BillingView.tsx`: Added interactive bike model search autocomplete (e.g. typing "Pulsar 150", "Splendor Plus") and live mechanic brand commission calculation.
+- `frontend/src/components/views/MechanicsView.tsx`: Integrated live mechanic partner management, brand percentage override matrix, and date-wise parts/commission audit ledger.
+- `docs/requirement.md`: Documented business requirements, user stories, and acceptance criteria for brands, mechanic commissions, date-wise ledgers, and search filters.
+
+### Updated
+- `backend/app/repositories/spare_part_repo.py`: Implemented tokenized multi-attribute search in `search_parts()` with SQL `AND` joining across terms and domain synonym expansions matching across item name, OEM part number, bike model, brand, model number, and barcode.
+- `backend/app/api/v1/endpoints/spare_parts.py`: Opened `PUT /api/v1/parts/{id}` to counter staff roles and extended query limit up to 500.
+- `frontend/src/api/modules/parts.api.ts`: Increased catalog fetch limit to 500 items for zero-latency client-side token search.
+- `frontend/src/components/views/InventoryView.tsx`: Replaced exact substring filtering with `matchSearchTokens` across name, brand, part number, model, bike model, rack, and barcode.
+- `frontend/src/components/views/BillingView.tsx`: Integrated `matchSearchTokens` for autocomplete suggestions and instant Enter-key part resolution for multi-word queries.
+- `backend/app/models/sale.py`: Added `mechanic_id` FK on `Sale` and `SaleItem`, plus line-item `commission_percentage` and `commission_amount`.
+- `backend/app/services/billing_service.py`: Enhanced atomic checkout engine to look up mechanic brand percentage overrides and record line-item commission amounts.
+- `docker-compose.yml`: Configured `build.args` with `NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8001/api/v1}` and aligned environment default port to 8001.
+- `frontend/Dockerfile`: Added `ARG NEXT_PUBLIC_API_URL` and `ENV NEXT_PUBLIC_API_URL` into Stage 2 builder for Next.js build-time inlining into client bundles.
+- `docs/docker-architecture.md`: Updated Section 4.1 frontend container specs and added Section 6.5 operational guide for rebuilding the frontend container after source code changes.
+- `docs/database-design.md`: Documented `brands`, `mechanics`, `mechanic_brand_commissions` tables, new sale columns, and updated ER diagrams.
+- `docs/api-reference.md`: Documented Brands Master API, Mechanics & Commissions API, Part update endpoint, billing checkout commission payloads, and tokenized search query semantics.
+
 ## 2026-11-25
 
 ### Added
+- `frontend/src/components/views/LoginView.tsx`: Implemented dedicated Liquid Glass counter authentication screen with real API sign-in, quick demo credentials, and session feedback.
+- `frontend/src/api/modules/auth.api.ts`: Modular authentication API service managing OAuth2 token exchange and `/auth/me` profile lookups.
+- `docs/frontend-development-milestones.md`: Established dedicated frontend UI integration milestones roadmap, living code ledger, and zero-mock verification curriculum.
+- `frontend/src/api/client.ts`: Implemented centralized HTTP fetch client with automated query string formatting, JWT token injection from `localStorage`, and standardized error handling.
+- `frontend/src/api/modules/parts.api.ts`: Modular spare parts API service with catalog search, barcode scanning, and snake_case to camelCase adapter mapping.
+- `frontend/src/api/modules/billing.api.ts`: Modular billing API service for counter checkouts and invoice retrieval.
+- `frontend/src/api/modules/imports.api.ts`: Modular Excel bulk import API service handling multipart FormData uploads.
+- `frontend/src/api/modules/reports.api.ts`: Modular business analytics API service for daily sales reconciliation, item velocity, and low-stock alerts.
+- `frontend/src/api/index.ts`: Central barrel export file exporting all domain APIs and TypeScript contracts.
 - `backend/app/models/sale.py`: Implemented `Sale` invoice entity and `SaleItem` line-items with `PaymentMethod` enum (`CASH`, `CARD`, `UPI`, `CREDIT`) and cascade lifecycle management.
 - `backend/app/models/stock_movement.py`: Implemented `StockMovement` immutable audit ledger model and `StockMovementType` enum (`SALE_OUT`, `PURCHASE_IN`, `RETURN_IN`, `ADJUSTMENT`).
 - `backend/alembic/versions/f8446218d474_create_sales_and_stock_movements_tables.py`: Generated and applied database migration creating `sales`, `sale_items`, and `stock_movements` tables in PostgreSQL.
@@ -26,6 +66,11 @@ and follows the governance instructions established in `AGENTS.md`.
 - `docs/api-reference.md`: Added Section 5 (Excel Bulk Imports) and Section 6 (Business Reports & Analytics) specifications.
 
 ### Updated
+- `frontend/src/components/views/BillingView.tsx`: Integrated live barcode gun scanner lookup via `partsApi.getByBarcode` and atomic checkout execution with `billingApi.checkout`.
+- `frontend/src/components/views/InventoryView.tsx`: Integrated real Excel bulk upload via `importsApi.uploadCatalogExcel` and manual spare part creation modal using `partsApi.create`.
+- `frontend/src/components/views/DashboardView.tsx`: Connected live daily sales reconciliation and top-selling fast movers to `reportsApi.getDailySales` and `reportsApi.getTopSelling`.
+- `frontend/src/components/views/ReportsView.tsx`: Replaced mock alert dialogs with interactive inspection modals for daily sales reconciliation and real-time low-stock audits.
+- `frontend/src/app/page.tsx`: Implemented global catalog synchronization callbacks and authentication session gate.
 - `backend/app/models/__init__.py`: Registered `Sale`, `SaleItem`, `PaymentMethod`, `StockMovement`, and `StockMovementType`.
 - `backend/app/api/v1/router.py`: Mounted `billing.router` under `/api/v1/billing`, `imports.router` under `/api/v1/imports`, and `reports.router` under `/api/v1/reports`.
 - `docs/development-milestones.md`: Marked Milestone 5 & 6 as Completed, documented complete source code and architectural explanations, and marked Milestone 7 as Active.
@@ -69,6 +114,11 @@ and follows the governance instructions established in `AGENTS.md`.
 - `backend/app/schemas/user.py`: Replaced `EmailStr` with standard `str` to eliminate external `email-validator` runtime dependency crashes during Uvicorn reload.
 
 ### Updated
+- `frontend/src/components/views/BillingView.tsx`: Integrated live barcode gun scanner lookup via `partsApi.getByBarcode` and atomic checkout execution with `billingApi.checkout`.
+- `frontend/src/components/views/InventoryView.tsx`: Integrated real Excel bulk upload via `importsApi.uploadCatalogExcel` and manual spare part creation modal using `partsApi.create`.
+- `frontend/src/components/views/DashboardView.tsx`: Connected live daily sales reconciliation and top-selling fast movers to `reportsApi.getDailySales` and `reportsApi.getTopSelling`.
+- `frontend/src/components/views/ReportsView.tsx`: Replaced mock alert dialogs with interactive inspection modals for daily sales reconciliation and real-time low-stock audits.
+- `frontend/src/app/page.tsx`: Implemented global catalog synchronization callbacks and authentication session gate.
 - `backend/app/main.py`: Mounted `api_router` under `/api/v1` and connected the `/health` endpoint to the live PostgreSQL container.
 - `docs/development-milestones.md`: Updated code ledger with complete source code and technical documentation for Milestone 3.
 - `AGENTS.md`: Integrated `docs/development-milestones.md` into project structure and defined documentation ownership policies.
@@ -84,6 +134,11 @@ and follows the governance instructions established in `AGENTS.md`.
 - Virtual environment setup (`.venv`) for isolated local backend execution.
 
 ### Updated
+- `frontend/src/components/views/BillingView.tsx`: Integrated live barcode gun scanner lookup via `partsApi.getByBarcode` and atomic checkout execution with `billingApi.checkout`.
+- `frontend/src/components/views/InventoryView.tsx`: Integrated real Excel bulk upload via `importsApi.uploadCatalogExcel` and manual spare part creation modal using `partsApi.create`.
+- `frontend/src/components/views/DashboardView.tsx`: Connected live daily sales reconciliation and top-selling fast movers to `reportsApi.getDailySales` and `reportsApi.getTopSelling`.
+- `frontend/src/components/views/ReportsView.tsx`: Replaced mock alert dialogs with interactive inspection modals for daily sales reconciliation and real-time low-stock audits.
+- `frontend/src/app/page.tsx`: Implemented global catalog synchronization callbacks and authentication session gate.
 - `README.md`: Updated local quick start guide to reflect the activated FastAPI backend on port 8001 and streamlined post-restart Docker startup instructions.
 - `docker-compose.yml`: Activated `backend` service with volume mount (`./backend:/app`) for real-time development hot-reloading and remapped host port to 8001 to prevent host port 8000 collisions.
 - `.env`: Configured `BACKEND_PORT=8001` and updated `NEXT_PUBLIC_API_URL` to point to port 8001.
@@ -103,6 +158,11 @@ and follows the governance instructions established in `AGENTS.md`.
 - `docs/deployment.md` detailing production deployment topologies, CI/CD pipelines, reverse proxy configurations (Nginx/Caddy), automated backup scripts, and rollback procedures.
 
 ### Updated
+- `frontend/src/components/views/BillingView.tsx`: Integrated live barcode gun scanner lookup via `partsApi.getByBarcode` and atomic checkout execution with `billingApi.checkout`.
+- `frontend/src/components/views/InventoryView.tsx`: Integrated real Excel bulk upload via `importsApi.uploadCatalogExcel` and manual spare part creation modal using `partsApi.create`.
+- `frontend/src/components/views/DashboardView.tsx`: Connected live daily sales reconciliation and top-selling fast movers to `reportsApi.getDailySales` and `reportsApi.getTopSelling`.
+- `frontend/src/components/views/ReportsView.tsx`: Replaced mock alert dialogs with interactive inspection modals for daily sales reconciliation and real-time low-stock audits.
+- `frontend/src/app/page.tsx`: Implemented global catalog synchronization callbacks and authentication session gate.
 - `AGENTS.md`: Integrated `README.md` governance, ownership specification, and added verification check to the task completion checklist ensuring setup instructions remain synchronized with implementation.
 - `frontend/next.config.ts`: Configured `output: "standalone"` to bundle traced production dependencies into `.next/standalone`, reducing container size to ~120 MB.
 - `frontend/package.json`: Updated `dev` and `build` scripts with `--webpack` flag to resolve Next.js 16 child process IPC timeout bug on Windows.

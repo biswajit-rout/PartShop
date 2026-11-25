@@ -8,11 +8,12 @@ export type NavigationSection =
   | "Settings";
 
 export type StockStatus = "In Stock" | "Low Stock" | "Out of Stock";
+export type BrandName = "Hero" | "Honda" | "TVS" | "Rollon" | "Bajaj" | "Castrol" | "Bosch" | "Motul" | "NGK" | string;
 
 export interface SparePart {
   id: string;
   name: string;
-  brand: "Hero" | "Honda" | "TVS" | "Rollon" | "Bajaj" | "Castrol" | "Local";
+  brand: BrandName;
   partNumber: string;
   modelNumber: string;
   compatibleBikes: string;
@@ -26,6 +27,14 @@ export interface SparePart {
   barcode: string;
 }
 
+export interface Brand {
+  id: number;
+  name: string;
+  code?: string;
+  description?: string;
+  createdAt?: string;
+}
+
 export interface Supplier {
   id: string;
   name: string;
@@ -36,13 +45,52 @@ export interface Supplier {
   totalPurchases: number;
 }
 
+export interface MechanicBrandCommission {
+  id?: number;
+  mechanicId?: number;
+  brandId: number;
+  brandName?: string;
+  commissionPercentage: number;
+}
+
 export interface Mechanic {
   id: string;
   name: string;
   garageName: string;
   mobile: string;
+  phone?: string;
+  address?: string;
+  defaultCommissionPercentage?: number;
   commissionPercentage: number;
   pendingCommission: number;
+  isActive?: boolean;
+  brandCommissions?: MechanicBrandCommission[];
+}
+
+export interface MechanicItemRecord {
+  saleId: number;
+  invoiceNumber: string;
+  date: string;
+  sparePartId: number;
+  itemName: string;
+  partNumber: string;
+  brandName: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  commissionPercentage: number;
+  commissionAmount: number;
+  customerName?: string;
+  customerPhone?: string;
+}
+
+export interface MechanicSummary {
+  mechanicId: number;
+  mechanicName: string;
+  garageName?: string;
+  totalItemsTaken: number;
+  totalSalesVolume: number;
+  totalCommissionEarned: number;
 }
 
 export interface SalesTrendData {

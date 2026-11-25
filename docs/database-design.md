@@ -62,11 +62,42 @@ erDiagram
         timestamptz created_at
     }
 
+    brands {
+        int id PK
+        varchar name UK "Indexed"
+        varchar code
+        text description
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    mechanics {
+        int id PK
+        varchar name
+        varchar phone UK "Indexed"
+        varchar garage_name
+        text address
+        numeric default_commission_percentage "5, 2 default 5.0"
+        boolean is_active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    mechanic_brand_commissions {
+        int id PK
+        int mechanic_id FK "Cascade"
+        int brand_id FK "Cascade"
+        numeric commission_percentage "5, 2"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
     sales {
         int id PK
         varchar invoice_number UK
         varchar customer_name
         int cashier_id FK
+        int mechanic_id FK "SET NULL"
         numeric subtotal
         numeric gst_amount
         numeric grand_total
@@ -78,6 +109,9 @@ erDiagram
         int id PK
         int sale_id FK
         int spare_part_id FK
+        int mechanic_id FK "SET NULL"
+        numeric commission_percentage "5, 2"
+        numeric commission_amount "10, 2"
         int quantity
         numeric unit_price
         numeric discount
@@ -95,6 +129,9 @@ erDiagram
     }
 
     users ||--o{ sales : "processes"
+    mechanics ||--o{ sales : "credited in"
+    mechanics ||--|{ mechanic_brand_commissions : "has"
+    brands ||--o{ mechanic_brand_commissions : "configured in"
     sales ||--|{ sale_items : "contains"
     spare_parts ||--o{ sale_items : "sold in"
     spare_parts ||--o{ stock_movements : "audited by"
@@ -153,6 +190,7 @@ Stores POS counter sales invoices, cashier details, tax breakdown, and payment m
 | `customer_name` | `VARCHAR(100)` | `NULLABLE` | Walk-in or counter customer name |
 | `customer_phone` | `VARCHAR(20)` | `NULLABLE` | Customer mobile number |
 | `cashier_id` | `INTEGER` | `NOT NULL`, `FK -> users.id` | Staff member who processed the transaction |
+| `mechanic_id` | `INTEGER` | `NULLABLE`, `FK -> mechanics.id (SET NULL)` | Mechanic partner credited for this transaction |
 | `subtotal` | `NUMERIC(10, 2)` | `NOT NULL` | Total before tax and discounts |
 | `discount_amount`| `NUMERIC(10, 2)` | `NOT NULL`, Default: `0.00` | Total discount applied |
 | `tax_amount` | `NUMERIC(10, 2)` | `NOT NULL`, Default: `0.00` | Calculated GST amount (CGST + SGST) |
@@ -169,6 +207,9 @@ Line items inside a sales invoice.
 | `id` | `INTEGER` | `PRIMARY KEY`, `AUTO_INCREMENT` | Unique line item ID |
 | `sale_id` | `INTEGER` | `NOT NULL`, `FK -> sales.id` | Parent invoice ID |
 | `spare_part_id` | `INTEGER` | `NOT NULL`, `FK -> spare_parts.id` | Part that was sold |
+| `mechanic_id` | `INTEGER` | `NULLABLE`, `FK -> mechanics.id (SET NULL)` | Attributed mechanic partner for this line item |
+| `commission_percentage` | `NUMERIC(5, 2)` | `NOT NULL`, Default: `0.00` | Resolved commission percentage applied for part brand |
+| `commission_amount` | `NUMERIC(10, 2)` | `NOT NULL`, Default: `0.00` | Computed mechanic payout amount for this item |
 | `quantity` | `INTEGER` | `NOT NULL` | Number of units sold |
 | `unit_price` | `NUMERIC(10, 2)` | `NOT NULL` | Unit price at time of sale |
 | `discount_percent` | `NUMERIC(5, 2)` | `NOT NULL`, Default: `0.00` | Discount applied to item |
@@ -187,6 +228,46 @@ Audit trail tracking every single inventory increment or decrement.
 | `reference_type` | `VARCHAR(50)` | `NULLABLE` | `SALE`, `PURCHASE`, `DAMAGE` |
 | `reference_id` | `INTEGER` | `NULLABLE` | Foreign invoice or PO reference number |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp when movement took place |
+
+### 3.6 `brands` Table
+Master manufacturer and aftermarket spares catalog brands.
+
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | `PRIMARY KEY`, `AUTO_INCREMENT` | Unique brand identifier |
+| `name` | `VARCHAR(100)` | `UNIQUE`, `NOT NULL`, `INDEXED` | Brand title (Hero, Bajaj, TVS, Honda, etc.) |
+| `code` | `VARCHAR(50)` | `NULLABLE` | Short manufacturer code |
+| `description` | `TEXT` | `NULLABLE` | Brand description and category |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
+| `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
+
+### 3.7 `mechanics` Table
+Registered garage and technician partners.
+
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | `PRIMARY KEY`, `AUTO_INCREMENT` | Unique mechanic identifier |
+| `name` | `VARCHAR(100)` | `NOT NULL` | Mechanic full name |
+| `phone` | `VARCHAR(20)` | `UNIQUE`, `NOT NULL`, `INDEXED` | Contact telephone / mobile |
+| `garage_name` | `VARCHAR(150)` | `NULLABLE` | Garage or workshop trade name |
+| `address` | `TEXT` | `NULLABLE` | Physical shop address |
+| `default_commission_percentage` | `NUMERIC(5, 2)` | `NOT NULL`, Default: `5.00` | Fallback commission rate across unlisted brands |
+| `is_active` | `BOOLEAN` | `NOT NULL`, Default: `TRUE` | Soft-deletion and active toggle |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
+| `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
+
+### 3.8 `mechanic_brand_commissions` Table
+Customized brand-specific commission override rates per mechanic partner.
+
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | `PRIMARY KEY`, `AUTO_INCREMENT` | Unique override ID |
+| `mechanic_id` | `INTEGER` | `NOT NULL`, `FK -> mechanics.id (CASCADE)` | Associated mechanic |
+| `brand_id` | `INTEGER` | `NOT NULL`, `FK -> brands.id (CASCADE)` | Associated brand |
+| `commission_percentage` | `NUMERIC(5, 2)` | `NOT NULL` | Custom commission % for this brand |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
+| `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
+| *Constraint* | `UNIQUE(mechanic_id, brand_id)` | `NOT NULL` | One rate per mechanic-brand pair |
 
 ---
 

@@ -91,6 +91,8 @@ project\-root/
 
 │   ├── development-milestones.md
 
+│   ├── frontend-development-milestones.md
+
 │   └── changelog.md
 
 │
@@ -374,7 +376,7 @@ Required Updates:
 
 Purpose:
 
-- Living progress tracker for development milestones
+- Living progress tracker for backend development milestones
 - Curriculum and learning objectives
 - Detailed per-milestone file and concept inventory
 - Verification commands and progress status
@@ -390,6 +392,29 @@ Required Updates:
 - Milestone status table
 - Completed date
 - Concepts and file inventories
+
+---
+
+## docs/frontend-development-milestones.md
+
+Purpose:
+
+- Living progress tracker for frontend UI integration milestones
+- Detailed per-milestone React component and adapter inventory
+- API module integration and data flow contracts
+- Verification steps and zero-mock validation criteria
+
+Update When:
+
+- A frontend integration milestone starts or completes
+- New frontend architectural milestones or view adapters are introduced
+- Verification steps or files in a frontend milestone change
+
+Required Updates:
+
+- Frontend milestone status table
+- Completed date
+- Component integration inventories and code ledger
 
 ---
 
