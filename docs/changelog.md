@@ -16,14 +16,21 @@ and follows the governance instructions established in `AGENTS.md`.
 - `backend/app/schemas/billing.py`: Implemented Pydantic v2 schemas (`CartItemInput`, `CheckoutRequest`, `SaleItemResponse`, `InvoiceResponse`) for POS checkout transactions and invoice rendering.
 - `backend/app/services/billing_service.py`: Implemented core atomic POS checkout engine featuring PostgreSQL row-level locking (`with_for_update()`), inventory validation and decrementing, 18% GST calculation, immutable audit ledger tracking, and atomic rollback guarantees.
 - `backend/app/api/v1/endpoints/billing.py`: Implemented POS billing endpoints (`POST /api/v1/billing/checkout` and `GET /api/v1/billing/invoices/{invoice_id}`) guarded by JWT authentication.
-- `docs/api-reference.md`: Added Section 4 detailing POS counter billing endpoints, request/response contracts, and error handling.
+- `backend/requirements.txt`: Added `openpyxl==3.1.5` for lightweight Excel (.xlsx) parsing.
+- `backend/app/schemas/imports.py`: Pydantic schemas for Excel bulk imports (`ImportSummaryResponse`, `RowErrorDetail`).
+- `backend/app/schemas/reports.py`: Pydantic schemas for business intelligence reports (`DailySalesSummary`, `PaymentBreakdown`, `TopSellingPart`, `LowStockItem`).
+- `backend/app/services/import_service.py`: Bulk catalog import service validating Excel headers, detecting database and batch duplicates, creating parts, and writing opening stock movements.
+- `backend/app/api/v1/endpoints/imports.py`: REST endpoint for bulk importing parts from `.xlsx` files (`POST /api/v1/imports/parts-excel`).
+- `backend/app/services/report_service.py`: Business analytics service generating daily sales reconciliation, payment channel totals, top-selling parts, and low-stock alerts.
+- `backend/app/api/v1/endpoints/reports.py`: REST endpoints for daily sales settlement, item velocity, and stock health audits (`/api/v1/reports/*`).
+- `docs/api-reference.md`: Added Section 5 (Excel Bulk Imports) and Section 6 (Business Reports & Analytics) specifications.
 
 ### Updated
 - `backend/app/models/__init__.py`: Registered `Sale`, `SaleItem`, `PaymentMethod`, `StockMovement`, and `StockMovementType`.
-- `backend/app/api/v1/router.py`: Mounted `billing.router` under `/api/v1/billing`.
-- `docs/development-milestones.md`: Marked Milestone 5 as Completed, added complete source code and architectural explanations for schemas, billing service, endpoints, and router, and marked Milestone 6 as Active.
+- `backend/app/api/v1/router.py`: Mounted `billing.router` under `/api/v1/billing`, `imports.router` under `/api/v1/imports`, and `reports.router` under `/api/v1/reports`.
+- `docs/development-milestones.md`: Marked Milestone 5 & 6 as Completed, documented complete source code and architectural explanations, and marked Milestone 7 as Active.
 - `docs/database-design.md`: Added detailed schema definitions for `sales`, `sale_items`, and `stock_movements`.
-- `docs/backend-architecture.md`: Updated milestone status roadmap to reflect Milestone 5 completion and Milestone 6 activation.
+- `docs/backend-architecture.md`: Updated milestone status roadmap to reflect Milestone 6 completion and Milestone 7 activation.
 
 ---
 

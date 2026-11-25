@@ -271,3 +271,144 @@ Fetches complete invoice details, tax breakdown, and all line items for display 
   - `404 Not Found`: Invoice not found.
   - `401 Unauthorized`: Missing or invalid JWT token.
 
+---
+
+## 5. Excel Bulk Imports (`/api/v1/imports`)
+
+### 5.1 Bulk Import Spare Parts Catalog
+Uploads an Excel (`.xlsx`) catalog file, validates rows, detects and skips duplicates, and bulk-inserts parts into PostgreSQL with audit ledger tracking.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/imports/parts-excel`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`)
+- **Content-Type**: `multipart/form-data`
+- **Form Parameters**:
+  - `file`: Excel file (`.xlsx`) containing spare parts data.
+- **Header Columns Expected in Excel**:
+  - Required: `item_name`, `brand_name` (or `brand`), `part_number`, `purchase_price`, `selling_price`
+  - Optional: `model_number`, `compatible_bikes`, `quantity`, `min_stock_alert`, `rack_number`, `customer_discount`, `mechanic_discount`, `barcode`
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "filename": "bajaj_pulsar_catalog_nov2026.xlsx",
+    "total_rows_processed": 150,
+    "imported_count": 148,
+    "skipped_count": 2,
+    "errors": [
+      {
+        "row_number": 45,
+        "part_number": "BP-201-FR",
+        "reason": "Part number 'BP-201-FR' already exists in database or spreadsheet."
+      },
+      {
+        "row_number": 82,
+        "part_number": null,
+        "reason": "item_name, brand_name, and part_number cannot be empty."
+      }
+    ]
+  }
+  ```
+- **Error Codes**:
+  - `400 Bad Request`: File is not a valid `.xlsx` workbook or required columns are missing from row 1.
+  - `403 Forbidden`: Insufficient role permissions (requires `ADMIN` or `STORE_MANAGER`).
+  - `401 Unauthorized`: Missing or invalid JWT token.
+
+---
+
+## 6. Business Reports & Analytics (`/api/v1/reports`)
+
+### 6.1 Daily Sales Settlement Report
+Retrieves aggregated daily revenue, discount totals, GST tax liability, and settlement breakdowns across cash, UPI, cards, and customer credit.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/reports/daily-sales`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`)
+- **Query Parameters**:
+  - `target_date` (string, optional, format: `YYYY-MM-DD`, default: today): Date for the reconciliation report.
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "report_date": "2026-11-25",
+    "total_invoices": 42,
+    "total_subtotal": "38450.00",
+    "total_discount": "1200.00",
+    "total_tax": "6705.00",
+    "grand_total": "43955.00",
+    "payments_breakdown": [
+      {
+        "payment_method": "CASH",
+        "count": 24,
+        "total_amount": "21500.00"
+      },
+      {
+        "payment_method": "UPI",
+        "count": 16,
+        "total_amount": "19455.00"
+      },
+      {
+        "payment_method": "CARD",
+        "count": 2,
+        "total_amount": "3000.00"
+      }
+    ]
+  }
+  ```
+- **Error Codes**:
+  - `403 Forbidden`: Insufficient role permissions.
+  - `401 Unauthorized`: Missing or invalid JWT token.
+
+---
+
+### 6.2 Top-Selling High-Velocity Parts
+Identifies top-performing parts ranked by total units sold and revenue generated.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/reports/top-selling`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Query Parameters**:
+  - `limit` (integer, optional, default: `10`, range: `1-50`): Maximum number of top parts to return.
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "spare_part_id": 12,
+      "item_name": "Motul 7100 4T 10W-50 1L Engine Oil",
+      "part_number": "OIL-MOT-7100",
+      "brand_name": "Motul",
+      "units_sold": 64,
+      "total_revenue": "54400.00"
+    },
+    {
+      "spare_part_id": 5,
+      "item_name": "Front Brake Pad Set",
+      "part_number": "BP-4029-FR",
+      "brand_name": "Bosch",
+      "units_sold": 38,
+      "total_revenue": "17100.00"
+    }
+  ]
+  ```
+
+---
+
+### 6.3 Low-Stock Warning List
+Retrieves all spare parts whose stock on hand has dropped to or below their configured minimum threshold (`quantity <= min_stock_alert`).
+
+- **Method**: `GET`
+- **Route**: `/api/v1/reports/low-stock`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "id": 18,
+      "item_name": "Spark Plug CPR8EA-9",
+      "brand_name": "NGK",
+      "part_number": "SP-NGK-CPR8",
+      "rack_number": "Rack-A2",
+      "quantity": 2,
+      "min_stock_alert": 10
+    }
+  ]
+  ```
+

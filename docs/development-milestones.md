@@ -22,16 +22,15 @@ flowchart LR
     M2 --> M3["Milestone 3<br/>JWT Auth & RBAC<br/>(Done)"]
     M3 --> M4["Milestone 4<br/>Parts & Repositories<br/>(Done)"]
     M4 --> M5["Milestone 5<br/>Atomic POS Billing<br/>(Done)"]
-    M5 --> M6["Milestone 6<br/>Excel Imports & Reports<br/>(In Progress)"]
-    M6 --> M7["Milestone 7<br/>Docker & Full Stack<br/>(Pending)"]
+    M5 --> M6["Milestone 6<br/>Excel Imports & Reports<br/>(Done)"]
+    M6 --> M7["Milestone 7<br/>Docker & Full Stack<br/>(In Progress)"]
 
     classDef done fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ecfdf5;
     classDef current fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#cbd5e1;
     classDef pending fill:#0f172a,stroke:#64748b,stroke-width:1px,color:#94a3b8;
 
-    class M0,M1,M2,M3,M4,M5 done;
-    class M6 current;
-    class M7 pending;
+    class M0,M1,M2,M3,M4,M5,M6 done;
+    class M7 current;
 ```
 
 ---
@@ -46,8 +45,8 @@ flowchart LR
 | **Milestone 3** | **Security & Authentication (JWT + RBAC)** | Password hashing (bcrypt), JWT tokens, and role-based guards (`ADMIN`, `STAFF`). | `Completed` | 2026-11-23 |
 | **Milestone 4** | **Clean Architecture & Spare Parts Catalog** | Repository Pattern, Inventory Service, barcode and bike model search. | `Completed` | 2026-11-24 |
 | **Milestone 5** | **Atomic POS Billing Engine** | Row-level locking (`SELECT FOR UPDATE`), stock decrement, GST, and invoices. | `Completed` | 2026-11-25 |
-| **Milestone 6** | **Excel Bulk Imports & Business Reporting** | Import `.xlsx` catalogs, batch validation, daily counter analytics. | `In Progress` | *Active* |
-| **Milestone 7** | **Dockerization & Next.js UI Integration** | Connect Next.js frontend calls to live FastAPI backend in Docker Compose. | `Pending` | — |
+| **Milestone 6** | **Excel Bulk Imports & Business Reporting** | Import `.xlsx` catalogs, batch validation, daily counter analytics. | `Completed` | 2026-11-25 |
+| **Milestone 7** | **Dockerization & Next.js UI Integration** | Connect Next.js frontend calls to live FastAPI backend in Docker Compose. | `In Progress` | *Active* |
 
 ---
 
@@ -1769,11 +1768,498 @@ api_router.include_router(billing.router)
 ---
 
 ### Milestone 6: Excel Bulk Imports & Business Reporting
-- **Status**: `In Progress`
+- **Status**: `Completed` (2026-11-25)
 - **Objective**: Provide shop owners with Excel spreadsheet bulk imports (`.xlsx`) for instant catalog onboarding, and generate business analytics (daily counter sales, revenue totals, top-selling parts, and low-stock alerts).
+
+#### 1. File Created: `backend/app/schemas/imports.py`
+```python
+from pydantic import BaseModel
+
+
+class RowErrorDetail(BaseModel):
+    """Details of any invalid or duplicate row in the uploaded Excel sheet."""
+    row_number: int
+    part_number: str | None = None
+    reason: str
+
+
+class ImportSummaryResponse(BaseModel):
+    """Summary of the bulk catalog import operation."""
+    filename: str
+    total_rows_processed: int
+    imported_count: int
+    skipped_count: int
+    errors: list[RowErrorDetail] = []
+```
+> **Why**: Returns comprehensive feedback to the user on Excel uploads—processing valid rows and providing line-number error logs for corrupt/duplicate rows.
 
 ---
 
-### Planned Milestones:
+#### 2. File Created: `backend/app/schemas/reports.py`
+```python
+from datetime import date
+from decimal import Decimal
+from pydantic import BaseModel
 
-- **Milestone 7: Docker Containerization & Next.js Integration**
+
+class PaymentBreakdown(BaseModel):
+    """Total collected per payment channel (CASH, UPI, CARD, CREDIT)."""
+    payment_method: str
+    count: int
+    total_amount: Decimal
+
+
+class DailySalesSummary(BaseModel):
+    """Daily revenue, tax, and settlement metrics for the shop owner."""
+    report_date: date
+    total_invoices: int
+    total_subtotal: Decimal
+    total_discount: Decimal
+    total_tax: Decimal  # GST
+    grand_total: Decimal
+    payments_breakdown: list[PaymentBreakdown] = []
+
+
+class TopSellingPart(BaseModel):
+    """High-velocity parts ranked by units sold and revenue."""
+    spare_part_id: int
+    item_name: str
+    part_number: str
+    brand_name: str
+    units_sold: int
+    total_revenue: Decimal
+
+
+class LowStockItem(BaseModel):
+    """Urgent re-order alert for parts below minimum threshold."""
+    id: int
+    item_name: str
+    brand_name: str
+    part_number: str
+    rack_number: str | None
+    quantity: int
+    min_stock_alert: int
+```
+
+---
+
+#### 3. File Created: `backend/app/services/import_service.py`
+```python
+import io
+from decimal import Decimal
+import openpyxl
+from fastapi import UploadFile, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.spare_part import SparePart
+from app.models.stock_movement import StockMovement, StockMovementType
+from app.schemas.imports import ImportSummaryResponse, RowErrorDetail
+
+
+class ImportService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def import_parts_from_excel(self, file: UploadFile) -> ImportSummaryResponse:
+        if not file.filename or not file.filename.endswith((".xlsx", ".xlsm")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid file format. Please upload an Excel file ending with .xlsx.",
+            )
+
+        contents = await file.read()
+        try:
+            workbook = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unable to read Excel workbook: {str(e)}",
+            )
+
+        sheet = workbook.active
+        if not sheet or sheet.max_row < 2:
+            return ImportSummaryResponse(
+                filename=file.filename,
+                total_rows_processed=0,
+                imported_count=0,
+                skipped_count=0,
+                errors=[],
+            )
+
+        headers: dict[str, int] = {}
+        header_row = [cell.value for cell in sheet[1]]
+        for idx, col_name in enumerate(header_row):
+            if col_name:
+                normalized = str(col_name).strip().lower().replace(" ", "_")
+                headers[normalized] = idx
+
+        if "brand" in headers and "brand_name" not in headers:
+            headers["brand_name"] = headers["brand"]
+
+        required_headers = ["item_name", "brand_name", "part_number", "purchase_price", "selling_price"]
+        missing = [h for h in required_headers if h not in headers]
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Missing required columns in Excel sheet: {', '.join(missing)}.",
+            )
+
+        existing_part_res = await self.db.execute(select(SparePart.part_number))
+        existing_part_numbers = set(existing_part_res.scalars().all())
+
+        existing_barcode_res = await self.db.execute(
+            select(SparePart.barcode).where(SparePart.barcode.isnot(None))
+        )
+        existing_barcodes = set(existing_barcode_res.scalars().all())
+
+        batch_part_numbers: set[str] = set()
+        batch_barcodes: set[str] = set()
+
+        imported_count = 0
+        skipped_count = 0
+        errors: list[RowErrorDetail] = []
+        total_rows = 0
+
+        for row_idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+            if not any(row):
+                continue
+            total_rows += 1
+
+            def get_val(key: str, default=None):
+                col_i = headers.get(key)
+                if col_i is not None and col_i < len(row):
+                    val = row[col_i]
+                    return val if val is not None else default
+                return default
+
+            item_name = str(get_val("item_name", "")).strip()
+            brand_name = str(get_val("brand_name", "")).strip()
+            part_number = str(get_val("part_number", "")).strip()
+            barcode = str(get_val("barcode", "")).strip() or None
+
+            if not item_name or not brand_name or not part_number:
+                errors.append(RowErrorDetail(
+                    row_number=row_idx,
+                    part_number=part_number or None,
+                    reason="item_name, brand_name, and part_number cannot be empty.",
+                ))
+                skipped_count += 1
+                continue
+
+            if part_number in existing_part_numbers or part_number in batch_part_numbers:
+                errors.append(RowErrorDetail(
+                    row_number=row_idx,
+                    part_number=part_number,
+                    reason=f"Part number '{part_number}' already exists in database or spreadsheet.",
+                ))
+                skipped_count += 1
+                continue
+
+            if barcode and (barcode in existing_barcodes or barcode in batch_barcodes):
+                errors.append(RowErrorDetail(
+                    row_number=row_idx,
+                    part_number=part_number,
+                    reason=f"Barcode '{barcode}' already registered in database or spreadsheet.",
+                ))
+                skipped_count += 1
+                continue
+
+            try:
+                purchase_price = Decimal(str(get_val("purchase_price", 0)))
+                selling_price = Decimal(str(get_val("selling_price", 0)))
+                quantity = int(get_val("quantity", 0) or 0)
+                min_stock_alert = int(get_val("min_stock_alert", 5) or 5)
+                cust_disc = Decimal(str(get_val("customer_discount", 0) or 0))
+                mech_disc = Decimal(str(get_val("mechanic_discount", 0) or 0))
+            except Exception as e:
+                errors.append(RowErrorDetail(
+                    row_number=row_idx,
+                    part_number=part_number,
+                    reason=f"Invalid numeric format: {str(e)}",
+                ))
+                skipped_count += 1
+                continue
+
+            new_part = SparePart(
+                item_name=item_name,
+                brand_name=brand_name,
+                part_number=part_number,
+                model_number=str(get_val("model_number", "")).strip() or None,
+                compatible_bikes=str(get_val("compatible_bikes", "")).strip() or None,
+                quantity=quantity,
+                min_stock_alert=min_stock_alert,
+                rack_number=str(get_val("rack_number", "")).strip() or None,
+                purchase_price=purchase_price,
+                selling_price=selling_price,
+                customer_discount=cust_disc,
+                mechanic_discount=mech_disc,
+                barcode=barcode,
+            )
+
+            self.db.add(new_part)
+            await self.db.flush()
+
+            if quantity > 0:
+                movement = StockMovement(
+                    spare_part_id=new_part.id,
+                    movement_type=StockMovementType.PURCHASE_IN,
+                    quantity_change=quantity,
+                    balance_after=quantity,
+                    reference_type="EXCEL_IMPORT",
+                )
+                self.db.add(movement)
+
+            batch_part_numbers.add(part_number)
+            if barcode:
+                batch_barcodes.add(barcode)
+            imported_count += 1
+
+        await self.db.commit()
+
+        return ImportSummaryResponse(
+            filename=file.filename or "uploaded.xlsx",
+            total_rows_processed=total_rows,
+            imported_count=imported_count,
+            skipped_count=skipped_count,
+            errors=errors,
+        )
+```
+
+---
+
+#### 4. File Created: `backend/app/api/v1/endpoints/imports.py`
+```python
+from typing import Annotated
+from fastapi import APIRouter, Depends, UploadFile, File, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.models.user import UserRole
+from app.schemas.imports import ImportSummaryResponse
+from app.services.import_service import ImportService
+from app.api.deps import require_role
+
+router = APIRouter(prefix="/imports", tags=["Excel Bulk Imports"])
+
+
+@router.post(
+    "/parts-excel",
+    response_model=ImportSummaryResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_role([UserRole.ADMIN, UserRole.STORE_MANAGER]))],
+)
+async def import_parts_from_excel(
+    file: Annotated[UploadFile, File(description="Excel workbook (.xlsx) containing spare parts")],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    service = ImportService(db)
+    return await service.import_parts_from_excel(file)
+```
+
+---
+
+#### 5. File Created: `backend/app/services/report_service.py`
+```python
+from datetime import date, datetime, time, timezone
+from decimal import Decimal
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.sale import Sale, SaleItem
+from app.models.spare_part import SparePart
+from app.schemas.reports import (
+    DailySalesSummary,
+    PaymentBreakdown,
+    TopSellingPart,
+    LowStockItem,
+)
+
+
+class ReportService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get_daily_sales_summary(self, target_date: date) -> DailySalesSummary:
+        start_datetime = datetime.combine(target_date, time.min).replace(tzinfo=timezone.utc)
+        end_datetime = datetime.combine(target_date, time.max).replace(tzinfo=timezone.utc)
+
+        summary_stmt = select(
+            func.count(Sale.id).label("total_invoices"),
+            func.coalesce(func.sum(Sale.subtotal), Decimal("0.00")).label("total_subtotal"),
+            func.coalesce(func.sum(Sale.discount_amount), Decimal("0.00")).label("total_discount"),
+            func.coalesce(func.sum(Sale.tax_amount), Decimal("0.00")).label("total_tax"),
+            func.coalesce(func.sum(Sale.grand_total), Decimal("0.00")).label("grand_total"),
+        ).where(Sale.created_at >= start_datetime, Sale.created_at <= end_datetime)
+
+        summary_res = await self.db.execute(summary_stmt)
+        row = summary_res.one()
+
+        payment_stmt = (
+            select(
+                Sale.payment_method,
+                func.count(Sale.id).label("count"),
+                func.coalesce(func.sum(Sale.grand_total), Decimal("0.00")).label("total_amount"),
+            )
+            .where(Sale.created_at >= start_datetime, Sale.created_at <= end_datetime)
+            .group_by(Sale.payment_method)
+        )
+
+        payment_res = await self.db.execute(payment_stmt)
+        breakdowns = [
+            PaymentBreakdown(
+                payment_method=r.payment_method.value if hasattr(r.payment_method, "value") else str(r.payment_method),
+                count=r.count,
+                total_amount=r.total_amount,
+            )
+            for r in payment_res.all()
+        ]
+
+        return DailySalesSummary(
+            report_date=target_date,
+            total_invoices=row.total_invoices or 0,
+            total_subtotal=row.total_subtotal,
+            total_discount=row.total_discount,
+            total_tax=row.total_tax,
+            grand_total=row.grand_total,
+            payments_breakdown=breakdowns,
+        )
+
+    async def get_top_selling_parts(self, limit: int = 10) -> list[TopSellingPart]:
+        stmt = (
+            select(
+                SparePart.id.label("spare_part_id"),
+                SparePart.item_name,
+                SparePart.part_number,
+                SparePart.brand_name,
+                func.sum(SaleItem.quantity).label("units_sold"),
+                func.coalesce(func.sum(SaleItem.total_price), Decimal("0.00")).label("total_revenue"),
+            )
+            .join(SaleItem, SaleItem.spare_part_id == SparePart.id)
+            .group_by(SparePart.id)
+            .order_by(func.sum(SaleItem.quantity).desc())
+            .limit(limit)
+        )
+
+        result = await self.db.execute(stmt)
+        return [
+            TopSellingPart(
+                spare_part_id=r.spare_part_id,
+                item_name=r.item_name,
+                part_number=r.part_number,
+                brand_name=r.brand_name,
+                units_sold=r.units_sold,
+                total_revenue=r.total_revenue,
+            )
+            for r in result.all()
+        ]
+
+    async def get_low_stock_report(self) -> list[LowStockItem]:
+        stmt = (
+            select(SparePart)
+            .where(SparePart.quantity <= SparePart.min_stock_alert)
+            .order_by(SparePart.quantity.asc())
+        )
+        result = await self.db.execute(stmt)
+        parts = result.scalars().all()
+
+        return [
+            LowStockItem(
+                id=p.id,
+                item_name=p.item_name,
+                brand_name=p.brand_name,
+                part_number=p.part_number,
+                rack_number=p.rack_number,
+                quantity=p.quantity,
+                min_stock_alert=p.min_stock_alert,
+            )
+            for p in parts
+        ]
+```
+
+---
+
+#### 6. File Created: `backend/app/api/v1/endpoints/reports.py`
+```python
+from datetime import date
+from typing import Annotated
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.models.user import UserRole
+from app.schemas.reports import DailySalesSummary, TopSellingPart, LowStockItem
+from app.services.report_service import ReportService
+from app.api.deps import require_role
+
+router = APIRouter(prefix="/reports", tags=["Business Reports & Analytics"])
+
+
+@router.get(
+    "/daily-sales",
+    response_model=DailySalesSummary,
+    dependencies=[Depends(require_role([UserRole.ADMIN, UserRole.STORE_MANAGER]))],
+)
+async def get_daily_sales(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    target_date: date = Query(default_factory=date.today, description="Date for sales settlement (YYYY-MM-DD)"),
+):
+    service = ReportService(db)
+    return await service.get_daily_sales_summary(target_date)
+
+
+@router.get(
+    "/top-selling",
+    response_model=list[TopSellingPart],
+    dependencies=[Depends(require_role([UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
+)
+async def get_top_selling_parts(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = Query(default=10, ge=1, le=50, description="Number of top items to return"),
+):
+    service = ReportService(db)
+    return await service.get_top_selling_parts(limit=limit)
+
+
+@router.get(
+    "/low-stock",
+    response_model=list[LowStockItem],
+    dependencies=[Depends(require_role([UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
+)
+async def get_low_stock_report(
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    service = ReportService(db)
+    return await service.get_low_stock_report()
+```
+
+---
+
+#### 7. File Updated: `backend/app/api/v1/router.py`
+```python
+from fastapi import APIRouter
+from app.api.v1.endpoints import auth, spare_parts, billing, imports, reports
+
+api_router = APIRouter()
+
+# Register Authentication endpoints under /api/v1/auth
+api_router.include_router(auth.router)
+
+# Register Spare Parts endpoints under /api/v1/parts
+api_router.include_router(spare_parts.router)
+
+# Register Billing & Checkout endpoints under /api/v1/billing
+api_router.include_router(billing.router)
+
+# Register Excel Bulk Import endpoints under /api/v1/imports
+api_router.include_router(imports.router)
+
+# Register Business Analytics Reports endpoints under /api/v1/reports
+api_router.include_router(reports.router)
+```
+
+---
+
+### Milestone 7: Docker Containerization & Next.js Integration
+- **Status**: `In Progress`
+- **Objective**: Connect the Next.js frontend to the live FastAPI backend container running in Docker Compose, configure API reverse proxying, and verify full end-to-end functionality.
