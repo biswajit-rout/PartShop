@@ -3,8 +3,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { SparePart, Mechanic } from "@/types";
 import { formatRupees } from "@/utils/formatters";
-import { matchSearchTokens } from "@/utils/search";
+import { matchSearchTokens, matchScannedCode } from "@/utils/search";
 import { partsApi, billingApi, mechanicsApi, InvoiceResponse } from "@/api";
+import { useScannerSession } from "@/context/ScannerContext";
 import PageHeading from "@/components/common/PageHeading";
 import GlassButton from "@/components/ui/glass/GlassButton";
 import GlassInput from "@/components/ui/glass/GlassInput";
@@ -23,6 +24,7 @@ import {
   Sparkles,
   Search,
   Bike,
+  Smartphone,
 } from "lucide-react";
 
 interface BillingViewProps {
@@ -59,6 +61,32 @@ export default function BillingView({
   const [generatedInvoice, setGeneratedInvoice] = useState<InvoiceResponse | null>(null);
   const [isSearchingBarcode, setIsSearchingBarcode] = useState(false);
 
+  // Consume Global Wireless Mobile Scanner Session
+  const { registerBarcodeListener, setIsModalOpen, isPhoneConnected } = useScannerSession();
+
+  // Listen for wireless mobile scanner scans
+  useEffect(() => {
+    const unregister = registerBarcodeListener(async (code) => {
+      // 1. Check local catalog first
+      const localMatch = products.find((p) => matchScannedCode(p, code));
+      if (localMatch) {
+        handleAddItemByPart(localMatch);
+        return;
+      }
+      // 2. Query remote backend
+      try {
+        const remotePart = await partsApi.getByBarcode(code);
+        if (remotePart) {
+          handleAddItemByPart(remotePart);
+        }
+      } catch (err) {
+        console.warn("Mobile scanned barcode not found in catalog:", code, err);
+      }
+    });
+
+    return unregister;
+  }, [registerBarcodeListener, products]);
+
   // Load live mechanics on mount
   useEffect(() => {
     async function loadMechanics() {
@@ -89,15 +117,7 @@ export default function BillingView({
   }, []);
 
   // Active shopping cart items
-  const [items, setItems] = useState<BillRow[]>(() => {
-    if (products.length >= 2) {
-      return [
-        { part: products[0], quantity: 1, discount: 0 },
-        { part: products[1], quantity: 1, discount: 0 },
-      ];
-    }
-    return [];
-  });
+  const [items, setItems] = useState<BillRow[]>([]);
 
   const selectedMechanic = liveMechanics.find(
     (m) => String(m.id) === String(selectedMechanicId)
@@ -144,11 +164,10 @@ export default function BillingView({
     const query = barcodeInput.trim();
     if (!query) return;
 
-    // Check in local catalog first (matching barcode, partNumber, or token match)
+    // Check in local catalog first (matching barcode, partNumber, smart QR match, or token match)
     const found = products.find(
       (p) =>
-        p.barcode === query ||
-        p.partNumber.toLowerCase() === query.toLowerCase() ||
+        matchScannedCode(p, query) ||
         matchSearchTokens(`${p.compatibleBikes} ${p.modelNumber} ${p.name} ${p.partNumber} ${p.brand} ${p.barcode}`, query)
     );
 
@@ -399,6 +418,21 @@ export default function BillingView({
                     className="glass-input h-11 w-full pl-11 pr-4 rounded-xl text-xs sm:text-sm font-sans placeholder:font-sans"
                   />
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(true)}
+                  className={`h-11 px-3 rounded-xl border flex items-center gap-1.5 text-xs font-mono transition-all cursor-pointer shrink-0 ${
+                    isPhoneConnected
+                      ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25"
+                      : "bg-white/5 border-white/10 text-slate-300 hover:bg-white/10 hover:text-white"
+                  }`}
+                  title={isPhoneConnected ? "Wireless phone scanner connected" : "Connect mobile phone scanner"}
+                >
+                  <Smartphone size={16} className={isPhoneConnected ? "text-emerald-400" : "text-sky-400"} />
+                  <span className="hidden sm:inline">
+                    {isPhoneConnected ? "Scanner Ready" : "Scan Phone"}
+                  </span>
+                </button>
                 <GlassButton
                   type="submit"
                   variant="primary"

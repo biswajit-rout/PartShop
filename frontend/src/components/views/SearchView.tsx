@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { SparePart, NavigationSection } from "@/types";
 import { formatRupees } from "@/utils/formatters";
-import { matchSearchTokens } from "@/utils/search";
+import { matchSearchTokens, matchScannedCode } from "@/utils/search";
+import { scannerApi, partsApi } from "@/api";
+import { useScannerSession } from "@/context/ScannerContext";
 import GlassCard from "@/components/ui/glass/GlassCard";
 import GlassButton from "@/components/ui/glass/GlassButton";
 import GlassBadge from "@/components/ui/glass/GlassBadge";
@@ -24,11 +26,23 @@ import {
   ShieldCheck,
   Tag,
   Hash,
+  Smartphone,
+  QrCode,
+  Wifi,
+  WifiOff,
+  RotateCcw,
+  CheckCircle2,
+  AlertCircle,
+  AlertTriangle,
+  ExternalLink,
+  PlusCircle,
+  TrendingUp,
 } from "lucide-react";
 
 interface SearchViewProps {
   products: SparePart[];
   onNavigate?: (section: NavigationSection) => void;
+  onRefreshCatalog?: () => void;
 }
 
 const POPULAR_SEARCH_PRESETS = [
@@ -41,10 +55,30 @@ const POPULAR_SEARCH_PRESETS = [
   "Disc Brake Shoe",
 ];
 
-export default function SearchView({ products, onNavigate }: SearchViewProps) {
+export default function SearchView({ products, onNavigate, onRefreshCatalog }: SearchViewProps) {
   const [query, setQuery] = useState("");
   const [copiedPartNumber, setCopiedPartNumber] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Consume Global Persistent Wireless Mobile Scanner Session
+  const {
+    setIsModalOpen,
+    scannerMode,
+    setScannerMode,
+    scannedBatch,
+    clearScannedBatch,
+    lastScanEvent,
+  } = useScannerSession();
+
+  // Fast Goods Inward / Restock Modal State
+  const [showRestockModal, setShowRestockModal] = useState(false);
+  const [restockingPart, setRestockingPart] = useState<SparePart | null>(null);
+  const [restockQty, setRestockQty] = useState("10");
+  const [restockPrice, setRestockPrice] = useState("");
+  const [restockRack, setRestockRack] = useState("");
+  const [isSubmittingRestock, setIsSubmittingRestock] = useState(false);
+  const [restockSuccessMsg, setRestockSuccessMsg] = useState<string | null>(null);
+  const [restockError, setRestockError] = useState<string | null>(null);
 
   // Autofocus search input on view mount
   useEffect(() => {
@@ -62,6 +96,33 @@ export default function SearchView({ products, onNavigate }: SearchViewProps) {
     });
   }, [products, query]);
 
+  // Handle incoming mobile scans in real time (persists continuously even when modal is closed)
+  useEffect(() => {
+    if (!lastScanEvent) return;
+
+    if (lastScanEvent.matchedPart) {
+      setQuery(lastScanEvent.matchedPart.partNumber || lastScanEvent.matchedPart.name);
+      if (scannerMode === "RESTOCK") {
+        setRestockingPart(lastScanEvent.matchedPart);
+        setRestockQty("10");
+        setRestockPrice(
+          lastScanEvent.matchedPart.purchasePrice
+            ? String(lastScanEvent.matchedPart.purchasePrice)
+            : ""
+        );
+        setRestockRack(lastScanEvent.matchedPart.rackNumber || "");
+        setShowRestockModal(true);
+      }
+    } else {
+      setQuery(lastScanEvent.barcode);
+    }
+  }, [lastScanEvent, scannerMode]);
+
+  const handleOpenScanner = (mode: "SEARCH" | "RESTOCK" = "SEARCH") => {
+    setScannerMode(mode);
+    setIsModalOpen(true);
+  };
+
   const handleCopyPartNumber = (partNumber: string) => {
     navigator.clipboard.writeText(partNumber);
     setCopiedPartNumber(partNumber);
@@ -76,6 +137,45 @@ export default function SearchView({ products, onNavigate }: SearchViewProps) {
   const handleClear = () => {
     setQuery("");
     inputRef.current?.focus();
+  };
+
+  // Submit Fast Goods Inward / Restock
+  const handleConfirmRestock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!restockingPart) return;
+
+    const qty = parseInt(restockQty, 10);
+    if (isNaN(qty) || qty <= 0) {
+      setRestockError("Quantity to add must be greater than zero.");
+      return;
+    }
+
+    setIsSubmittingRestock(true);
+    setRestockError(null);
+
+    try {
+      const price = restockPrice ? parseFloat(restockPrice) : undefined;
+      await partsApi.restock(restockingPart.id, {
+        quantity_to_add: qty,
+        purchase_price: !isNaN(price as number) ? price : undefined,
+        rack_number: restockRack.trim() || undefined,
+      });
+
+      setRestockSuccessMsg(`Successfully added ${qty} units to ${restockingPart.name}!`);
+      setTimeout(() => {
+        setRestockSuccessMsg(null);
+        setShowRestockModal(false);
+        setRestockingPart(null);
+      }, 1500);
+
+      if (onRefreshCatalog) {
+        onRefreshCatalog();
+      }
+    } catch (err: any) {
+      setRestockError(err.message || "Failed to update stock.");
+    } finally {
+      setIsSubmittingRestock(false);
+    }
   };
 
   const isQueryActive = query.trim().length > 0;
@@ -95,33 +195,46 @@ export default function SearchView({ products, onNavigate }: SearchViewProps) {
           Instantly search across part names, OEM codes, bike models, suppliers, and rack locators.
         </p>
 
-        {/* Hero Dedicated Search Input Box */}
+        {/* Hero Dedicated Search Input Box & Mobile Scanner Buttons */}
         <div className="w-full max-w-3xl mt-6 relative">
-          <div className="relative flex items-center">
-            <Search
-              size={22}
-              className="absolute left-4.5 text-sky-400 pointer-events-none transition-transform group-focus-within:scale-110"
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search part name, bike model, OEM number (e.g. Bajaj Pulsar Air filter, Activa brake)..."
-              className="glass-input h-14 w-full pl-13 pr-24 rounded-2xl text-sm sm:text-base text-white placeholder-slate-400 font-sans shadow-[0_4px_25px_rgba(0,0,0,0.3)] focus:border-sky-400/60 focus:ring-2 focus:ring-sky-400/20 transition-all"
-            />
-            {query && (
-              <button
-                onClick={handleClear}
-                className="absolute right-3.5 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-                aria-label="Clear search"
-              >
-                <X size={18} />
-              </button>
-            )}
+          <div className="relative flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search
+                size={22}
+                className="absolute left-4.5 text-sky-400 pointer-events-none transition-transform group-focus-within:scale-110"
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search part name, bike model, OEM number (e.g. Bajaj Pulsar Air filter, Activa brake)..."
+                className="glass-input h-14 w-full pl-13 pr-24 rounded-2xl text-sm sm:text-base text-white placeholder-slate-400 font-sans shadow-[0_4px_25px_rgba(0,0,0,0.3)] focus:border-sky-400/60 focus:ring-2 focus:ring-sky-400/20 transition-all"
+              />
+              {query && (
+                <button
+                  onClick={handleClear}
+                  className="absolute right-3.5 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                  aria-label="Clear search"
+                >
+                  <X size={18} />
+                </button>
+              )}
+            </div>
+
+            {/* Mobile Scanner Trigger Button */}
+            <GlassButton
+              variant="primary"
+              size="lg"
+              icon={<Smartphone size={18} className="text-sky-300" />}
+              onClick={() => handleOpenScanner("SEARCH")}
+              className="h-14 px-5 rounded-2xl shrink-0 font-bold shadow-lg shadow-sky-500/20"
+            >
+              Scan with Phone
+            </GlassButton>
           </div>
 
-          {/* Quick Search Preset Chips */}
+          {/* Quick Search Preset Chips & Restock Shortcut */}
           <div className="flex items-center gap-2 mt-3 overflow-x-auto pb-1 no-scrollbar justify-center flex-wrap">
             <span className="text-[11px] font-mono text-slate-500 uppercase tracking-wider flex items-center gap-1">
               Popular:
@@ -139,9 +252,67 @@ export default function SearchView({ products, onNavigate }: SearchViewProps) {
                 {preset}
               </button>
             ))}
+
+            {/* Direct Restock Scan Trigger */}
+            <button
+              onClick={() => handleOpenScanner("RESTOCK")}
+              className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold flex items-center gap-1.5 ml-2 cursor-pointer transition-all"
+            >
+              <Package size={13} />
+              <span>Inward Restock Scan</span>
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Scanned Batch Tray (Continuous Mode History) */}
+      {scannedBatch.length > 0 && (
+        <div className="p-4 rounded-2xl glass-panel border border-sky-500/30 bg-sky-950/20 shadow-xl space-y-3">
+          <div className="flex items-center justify-between text-xs font-mono">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-white font-bold">Continuous Scan Batch Tray</span>
+              <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 font-bold">
+                {scannedBatch.length} Items
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {onNavigate && (
+                <GlassButton
+                  size="sm"
+                  variant="primary"
+                  icon={<Receipt size={13} />}
+                  onClick={() => onNavigate("Billing")}
+                >
+                  Add Batch to Bill (POS)
+                </GlassButton>
+              )}
+              <button
+                onClick={clearScannedBatch}
+                className="text-slate-400 hover:text-rose-400 transition-colors cursor-pointer text-xs"
+              >
+                Clear Batch
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 overflow-x-auto pb-1 no-scrollbar">
+            {scannedBatch.map((part) => (
+              <div
+                key={part.id}
+                onClick={() => setQuery(part.partNumber || part.name)}
+                className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:border-sky-400/50 hover:bg-white/10 transition-all cursor-pointer shrink-0 min-w-[200px]"
+              >
+                <div className="text-xs font-bold text-white truncate">{part.name}</div>
+                <div className="flex items-center justify-between mt-1 text-[11px] font-mono">
+                  <span className="text-sky-300">{formatRupees(part.sellingPrice)}</span>
+                  <span className="text-slate-400">Rack: {part.rackNumber || "Unset"}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Results Content Area */}
       {isQueryActive ? (
@@ -281,9 +452,11 @@ export default function SearchView({ products, onNavigate }: SearchViewProps) {
                               <span className="text-[9px] uppercase font-mono text-slate-400 block tracking-wider">
                                 Quantity
                               </span>
-                              <span className={`text-xs font-bold font-mono ${
-                                isOutOfStock ? "text-rose-400" : isLowStock ? "text-amber-400" : "text-emerald-300"
-                              }`}>
+                              <span
+                                className={`text-xs font-bold font-mono ${
+                                  isOutOfStock ? "text-rose-400" : isLowStock ? "text-amber-400" : "text-emerald-300"
+                                }`}
+                              >
                                 {item.quantity} Units
                               </span>
                             </div>
@@ -307,7 +480,7 @@ export default function SearchView({ products, onNavigate }: SearchViewProps) {
                       </div>
                     </div>
 
-                    {/* Bottom Price & Quick POS Action */}
+                    {/* Bottom Price & Actions */}
                     <div className="pt-4 mt-4 border-t border-white/10 flex items-center justify-between gap-3">
                       <div>
                         <span className="text-[10px] uppercase font-mono text-slate-400 block tracking-wider">
@@ -325,18 +498,35 @@ export default function SearchView({ products, onNavigate }: SearchViewProps) {
                         </div>
                       </div>
 
-                      {/* Quick Bill Button */}
-                      {onNavigate && (
-                        <GlassButton
-                          size="sm"
-                          variant="primary"
-                          icon={<Receipt size={13} />}
-                          onClick={() => onNavigate("Billing")}
-                          className="shrink-0 text-xs px-3"
+                      {/* Quick Restock & Bill Actions */}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setRestockingPart(item);
+                            setRestockQty("10");
+                            setRestockPrice(item.purchasePrice ? String(item.purchasePrice) : "");
+                            setRestockRack(item.rackNumber || "");
+                            setShowRestockModal(true);
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-semibold border border-emerald-500/30 flex items-center gap-1 transition-colors cursor-pointer"
+                          title="Restock Incoming Units"
                         >
-                          Bill Item
-                        </GlassButton>
-                      )}
+                          <PlusCircle size={13} />
+                          <span>Restock</span>
+                        </button>
+
+                        {onNavigate && (
+                          <GlassButton
+                            size="sm"
+                            variant="primary"
+                            icon={<Receipt size={13} />}
+                            onClick={() => onNavigate("Billing")}
+                            className="shrink-0 text-xs px-3"
+                          >
+                            Bill Item
+                          </GlassButton>
+                        )}
+                      </div>
                     </div>
                   </GlassCard>
                 );
@@ -348,19 +538,14 @@ export default function SearchView({ products, onNavigate }: SearchViewProps) {
               <div className="w-16 h-16 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto mb-4 text-slate-400">
                 <Search size={28} className="text-slate-500" />
               </div>
-              <h3 className="text-lg font-bold text-white mb-2">
-                No matching spare parts found
-              </h3>
+              <h3 className="text-lg font-bold text-white mb-2">No matching spare parts found</h3>
               <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto mb-5 leading-relaxed">
-                We couldn&apos;t find any item matching &ldquo;<span className="text-sky-300 font-semibold">{query}</span>&rdquo;.
-                Try searching by broad terms like &ldquo;brake&rdquo;, &ldquo;filter&rdquo;, &ldquo;pulsar&rdquo;, or part code.
+                We couldn&apos;t find any item matching &ldquo;
+                <span className="text-sky-300 font-semibold">{query}</span>&rdquo;. Try searching by broad terms like
+                &ldquo;brake&rdquo;, &ldquo;filter&rdquo;, &ldquo;pulsar&rdquo;, or part code.
               </p>
               <div className="flex items-center justify-center gap-3">
-                <GlassButton
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleClear}
-                >
+                <GlassButton variant="secondary" size="sm" onClick={handleClear}>
                   Clear Search
                 </GlassButton>
                 {onNavigate && (
@@ -383,38 +568,184 @@ export default function SearchView({ products, onNavigate }: SearchViewProps) {
           <GlassCard className="p-5 rounded-2xl border border-white/5 bg-white/[0.02]">
             <div className="flex items-center gap-3 mb-2">
               <div className="p-2 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20">
-                <Search size={16} />
+                <Smartphone size={16} />
               </div>
-              <h4 className="text-sm font-bold text-white">Multi-Token Stems</h4>
+              <h4 className="text-sm font-bold text-white">Mobile Barcode Scanner</h4>
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Search by part type and model at once, e.g. <span className="text-sky-300 font-mono">Bajaj Pulsar Air filter</span> or <span className="text-sky-300 font-mono">Activa brake pad</span>.
-            </p>
-          </GlassCard>
-
-          <GlassCard className="p-5 rounded-2xl border border-white/5 bg-white/[0.02]">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                <Store size={16} />
-              </div>
-              <h4 className="text-sm font-bold text-white">Supplier & Discount</h4>
-            </div>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Every card shows distributor name, wholesale discount %, stock on hand, and rack shelf locator.
+              Click &ldquo;Scan with Phone&rdquo; to connect your phone camera as a wireless scanner. Scan any box on the
+              rack to see price and details immediately.
             </p>
           </GlassCard>
 
           <GlassCard className="p-5 rounded-2xl border border-white/5 bg-white/[0.02]">
             <div className="flex items-center gap-3 mb-2">
               <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <Receipt size={16} />
+                <TrendingUp size={16} />
               </div>
-              <h4 className="text-sm font-bold text-white">Instant Counter POS</h4>
+              <h4 className="text-sm font-bold text-white">Fast Goods Inward</h4>
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Click &ldquo;Bill Item&rdquo; directly on any search card to launch counter checkout with GST calculation.
+              Receive shipments faster. Scan existing items to bring up stock confirmation, verify quantity, and update
+              inventory with audit logs.
             </p>
           </GlassCard>
+
+          <GlassCard className="p-5 rounded-2xl border border-white/5 bg-white/[0.02]">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                <Store size={16} />
+              </div>
+              <h4 className="text-sm font-bold text-white">Wholesale Supplier Info</h4>
+            </div>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Every card shows distributor name, wholesale discount %, stock on hand, and rack shelf locator.
+            </p>
+          </GlassCard>
+        </div>
+      )}
+
+      {/* Fast Goods Inward / Restock Confirmation Dialog */}
+      {showRestockModal && restockingPart && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in">
+          <div className="glass-panel w-full max-w-lg p-6 rounded-3xl border border-emerald-500/30 bg-slate-900/95 shadow-2xl relative space-y-4">
+            <button
+              onClick={() => setShowRestockModal(false)}
+              className="absolute top-4 right-4 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <X size={18} />
+            </button>
+
+            {/* Dialog Header */}
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Package className="text-emerald-400" size={20} />
+                <h3 className="text-lg font-bold text-white">Incoming Stock Entry (Goods Inward)</h3>
+              </div>
+              <p className="text-xs text-slate-400">
+                Confirm incoming units received to instantly update stock and log audit movements.
+              </p>
+            </div>
+
+            {/* Part Summary Pill */}
+            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 space-y-2">
+              <div className="text-sm font-bold text-white leading-snug">{restockingPart.name}</div>
+              <div className="grid grid-cols-2 gap-2 text-xs font-mono text-slate-300">
+                <div>
+                  <span className="text-slate-500 block text-[10px]">OEM PART NO:</span>
+                  <span className="font-semibold text-sky-300">{restockingPart.partNumber}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px]">CURRENT STOCK:</span>
+                  <span className="font-bold text-emerald-400">{restockingPart.quantity} Units on Shelf</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px]">SUPPLIER:</span>
+                  <span className="truncate block">
+                    {restockingPart.supplierName || "OEM Direct"}
+                    {restockingPart.supplierDiscount ? ` (${restockingPart.supplierDiscount}% Disc)` : ""}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px]">SELLING PRICE (MRP):</span>
+                  <span className="font-bold text-white">{formatRupees(restockingPart.sellingPrice)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Restock Input Form */}
+            <form onSubmit={handleConfirmRestock} className="space-y-3.5">
+              {restockError && (
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-2">
+                  <AlertCircle size={14} className="shrink-0" />
+                  <span>{restockError}</span>
+                </div>
+              )}
+
+              {restockSuccessMsg && (
+                <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+                  <CheckCircle2 size={16} className="shrink-0" />
+                  <span>{restockSuccessMsg}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* Quantity to Add */}
+                <div>
+                  <label className="text-[11px] font-mono text-slate-400 block mb-1">
+                    Inward Quantity *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={restockQty}
+                    onChange={(e) => setRestockQty(e.target.value)}
+                    required
+                    className="glass-input h-10 w-full px-3 rounded-xl text-sm font-mono text-emerald-300 font-bold"
+                  />
+                </div>
+
+                {/* Purchase Cost */}
+                <div>
+                  <label className="text-[11px] font-mono text-slate-400 block mb-1">
+                    Purchase Cost (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={restockPrice}
+                    onChange={(e) => setRestockPrice(e.target.value)}
+                    placeholder="Cost price"
+                    className="glass-input h-10 w-full px-3 rounded-xl text-sm font-mono text-white"
+                  />
+                </div>
+
+                {/* Rack Locator */}
+                <div>
+                  <label className="text-[11px] font-mono text-slate-400 block mb-1">
+                    Rack / Bin Locator
+                  </label>
+                  <input
+                    type="text"
+                    value={restockRack}
+                    onChange={(e) => setRestockRack(e.target.value)}
+                    placeholder="e.g. B-04"
+                    className="glass-input h-10 w-full px-3 rounded-xl text-sm font-mono text-white"
+                  />
+                </div>
+              </div>
+
+              {/* Calculated Resulting Balance */}
+              <div className="p-2.5 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between text-xs font-mono">
+                <span className="text-slate-400">Resulting Stock Balance:</span>
+                <span className="text-emerald-400 font-bold">
+                  {restockingPart.quantity + (parseInt(restockQty, 10) || 0)} Units
+                </span>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <GlassButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowRestockModal(false)}
+                >
+                  Cancel
+                </GlassButton>
+
+                <GlassButton
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  disabled={isSubmittingRestock}
+                  icon={<CheckCircle2 size={14} />}
+                >
+                  {isSubmittingRestock ? "Adding Stock..." : "Confirm & Add Stock"}
+                </GlassButton>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

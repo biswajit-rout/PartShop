@@ -281,6 +281,28 @@ A focused, dedicated search terminal tab (`Search`) optimized for counter staff 
 
 ---
 
+## Wireless Mobile Barcode Scanner & Real-Time Goods Inward Restock
+
+Enables counter staff and store managers to use any smartphone camera as a wireless handheld barcode terminal via WebSocket communication, eliminating the need for dedicated Bluetooth laser scanner hardware.
+
+### Functional Requirements
+- **Dynamic QR Code Pairing**: Desktop displays a unique session pairing QR code encoding the local network IP URL (`http://<LAN_IP>:3000/scan?sid=<session_id>`). Scanning with a phone pairs the devices instantly.
+- **Persistent Connection Lifecycle**: WebSocket connection is decoupled from desktop modal visibility and managed at the root application context (`ScannerProvider`). Closing the pairing dialog keeps the WebSocket connection open in the background, allowing warehouse staff to continue scanning uninterrupted.
+- **Global Header Connection Beacon**: Real-time status badge in the top navigation header (`GlassHeader`) displaying active mobile scanner presence and total connected device count.
+- **Multi-Device Support & Connected Roster**: Multiple warehouse staff members can pair with the same terminal session simultaneously. Each smartphone registers a unique `device_id` and friendly name (`iPhone`, `Galaxy S23`, etc.), displayed in a live desktop roster with real-time scan count telemetry.
+- **Bi-Directional WebSocket Bridge**: Real-time message exchange between desktop and mobile devices via `/api/v1/scanner/ws/{session_id}` with ping/pong keepalive and room-wide `ROSTER_UPDATED` broadcasts.
+- **Four Core Operational Workflows**:
+  1. **Quick Part Search**: Scanning a barcode on a warehouse shelf instantly displays the matched spare part card on the desktop terminal with price, bike fitment, quantity, supplier discount, and rack locator.
+  2. **Automatic Barcode Assignment**: While creating a new part or editing an existing part missing a barcode, clicking *"Scan with Phone"* listens for a mobile scan and auto-populates the barcode field.
+  3. **Fast Goods Inward (Restock)**: Scanning an existing item opens a sleek confirmation dialog to enter incoming shipment quantities, adjust purchase cost, verify shelf bin, and increment stock with an automated `StockMovement` audit ledger entry.
+  4. **Wireless POS Billing**: In the Billing/Checkout view, scanning items with a smartphone instantly appends them to the active customer bill or increments quantity on the cashier's screen without touching the keyboard.
+- **2D Automotive QR Code & Barcode Engine**: Supports linear barcodes (EAN-13, UPC, Code-128) and 2D QR codes with exact matching, alphanumeric punctuation normalization (e.g. `01721-K0L-D00` vs `01721K0LD00`), delimited token parsing (e.g. `P/N:01721K0LD00;QTY:1`), and manufacturer verification URL decoding.
+- **Continuous Scanning Mode**: Session and camera remain persistently active across multiple boxes with 1.8s anti-spam debounce, allowing staff to walk down entire rack aisles scanning dozens of parts in sequence without reloading pages.
+- **Zero-SSL Camera Compatibility**: Full HTML5 native hardware camera capture fallback (`capture="environment"`) supporting 100% of mobile devices over local HTTP without SSL certificates or HTTPS restrictions.
+- **Audio & Haptic Feedback**: Mobile phone emits an audio beep and 100ms vibration confirmation upon barcode detection. Includes manual input fallback for damaged labels.
+
+---
+
 ## Item Brands Master Management
 
 Manage genuine and aftermarket manufacturer brands:
@@ -483,6 +505,36 @@ After scanning:
 - Show selling price
 
 Create APIs that can be directly consumed by Flutter or React Native mobile applications.
+
+---
+
+## Shop Expenditure & Daily Profit Management
+
+Enables the store owner and counter managers to track daily operating overheads and calculate net take-home profit:
+
+### Features & Functional Requirements
+- **Overhead Categorization**: Pre-configured categories (`Rent`, `Electricity`, `Tea & Refreshments`, `Salary / Wages`, `Maintenance`, `Transport / Courier`, `Stationery / Tools`, `Miscellaneous`).
+- **Payment Method Tracking**: Records whether overhead was disbursed via `Cash`, `UPI` (GPay / PhonePe), `Bank Transfer / NEFT`, or `Card`.
+- **Daily Net Profit Calculation**: Automatically reconciles gross daily sales revenue against daily operating expenses:
+  $$\text{Net Daily Profit} = \text{Total Counter Sales} - \text{Total Daily Expenses}$$
+- **Audit & Removal**: Role-gated controls allowing Store Managers and Admins to correct or delete erroneous expense vouchers.
+
+---
+
+## Global Header Instant Search & Autocomplete
+
+Provides rapid spare part discovery directly from the persistent top navigation header:
+- **Instant Dropdown Overlay**: Typing into the global search bar opens an overlay list showing the top matching parts.
+- **Part Details Preview**: Displays part name, genuine/aftermarket brand badge, OEM part number, compatible motorcycle models, retail selling price (₹), available stock count, and physical shelf bin locator.
+- **One-Click Navigation**: Selecting a matched part routes to the detailed search card or counter billing view.
+
+---
+
+## Session Authentication & User Logout
+
+Enables cashiers and store managers to securely terminate their session:
+- **Accessible Logout Controls**: Dedicated "Log Out" button with red accenting positioned in both the global top header and the left navigation sidebar.
+- **Token Invalidation**: Clears stored JWT credentials from local storage and redirects immediately to the login view.
 
 ---
 

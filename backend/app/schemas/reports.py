@@ -40,3 +40,11 @@ class LowStockItem(BaseModel):
     rack_number: str | None
     quantity: int
     min_stock_alert: int
+
+
+class WeeklyTrendPoint(BaseModel):
+    """Daily revenue and wholesale purchase expenditure data point for trend charts."""
+    day: str          # e.g. "Mon", "Tue", "Wed"
+    date: date        # e.g. 2026-11-26
+    sales: Decimal    # Counter retail sales
+    purchase: Decimal # Wholesale goods inward purchases

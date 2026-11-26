@@ -4,7 +4,8 @@ import React, { useState, useRef, useEffect } from "react";
 import { SparePart, Brand, Supplier } from "@/types";
 import { formatRupees } from "@/utils/formatters";
 import { matchSearchTokens } from "@/utils/search";
-import { importsApi, partsApi, brandsApi, suppliersApi, ImportSummaryResponse } from "@/api";
+import { importsApi, partsApi, brandsApi, suppliersApi, scannerApi, ImportSummaryResponse } from "@/api";
+import { useScannerSession } from "@/context/ScannerContext";
 import PageHeading from "@/components/common/PageHeading";
 import GlassBadge from "@/components/ui/glass/GlassBadge";
 import GlassButton from "@/components/ui/glass/GlassButton";
@@ -18,6 +19,8 @@ import {
   Filter,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
+  Wifi,
   Sparkles,
   X,
   Edit2,
@@ -26,6 +29,13 @@ import {
   Layers,
   Wrench,
   Percent,
+  Smartphone,
+  Barcode,
+  Package,
+  QrCode,
+  ExternalLink,
+  RotateCcw,
+  PlusCircle,
 } from "lucide-react";
 
 interface InventoryViewProps {
@@ -103,6 +113,21 @@ export default function InventoryView({
     barcode: "",
   });
 
+  // Consume Global Wireless Mobile Scanner Session
+  const { registerBarcodeListener, setIsModalOpen, isPhoneConnected } = useScannerSession();
+  const [barcodeScanTarget, setBarcodeScanTarget] = useState<
+    "NEW_PART" | "EDIT_PART" | { partId: string; partName: string } | null
+  >(null);
+  const [scannerToast, setScannerToast] = useState<string | null>(null);
+
+  // Quick Restock / Goods Inward Modal State
+  const [restockTarget, setRestockTarget] = useState<SparePart | null>(null);
+  const [inwardQty, setInwardQty] = useState("10");
+  const [inwardCost, setInwardCost] = useState("");
+  const [inwardRack, setInwardRack] = useState("");
+  const [isRestocking, setIsRestocking] = useState(false);
+  const [restockError, setRestockError] = useState<string | null>(null);
+
   // Load brands and suppliers master on mount
   useEffect(() => {
     async function loadMasterData() {
@@ -127,6 +152,53 @@ export default function InventoryView({
     }
     loadMasterData();
   }, []);
+
+  // Listen for wireless mobile scanner scans when an input target is active
+  useEffect(() => {
+    const unregister = registerBarcodeListener(async (code) => {
+      if (barcodeScanTarget === "NEW_PART") {
+        setNewPart((prev) => ({ ...prev, barcode: code }));
+        setScannerToast(`Barcode ${code} auto-filled!`);
+        setTimeout(() => {
+          setBarcodeScanTarget(null);
+          setScannerToast(null);
+        }, 1800);
+      } else if (barcodeScanTarget === "EDIT_PART") {
+        setEditForm((prev) => ({ ...prev, barcode: code }));
+        setScannerToast(`Barcode ${code} auto-filled!`);
+        setTimeout(() => {
+          setBarcodeScanTarget(null);
+          setScannerToast(null);
+        }, 1800);
+      } else if (typeof barcodeScanTarget === "object" && barcodeScanTarget?.partId) {
+        try {
+          await partsApi.assignBarcode(barcodeScanTarget.partId, code);
+          setScannerToast(`Barcode ${code} assigned to ${barcodeScanTarget.partName}!`);
+          if (onRefreshCatalog) onRefreshCatalog();
+        } catch (err: any) {
+          setScannerToast(`Barcode assignment failed: ${err.message}`);
+        }
+        setTimeout(() => {
+          setBarcodeScanTarget(null);
+          setScannerToast(null);
+        }, 1800);
+      }
+    });
+
+    return unregister;
+  }, [barcodeScanTarget, registerBarcodeListener, onRefreshCatalog]);
+
+  const handleTriggerPhoneScan = (
+    target: "NEW_PART" | "EDIT_PART" | { partId: string; partName: string }
+  ) => {
+    setBarcodeScanTarget(target);
+    if (!isPhoneConnected) {
+      setIsModalOpen(true);
+    } else {
+      setScannerToast("📱 Phone ready! Scan the item barcode now...");
+      setTimeout(() => setScannerToast(null), 3000);
+    }
+  };
 
   // Tokenized multi-attribute search filter with automotive synonym expansion & supplier filter
   const filteredProducts = products.filter((item) => {
@@ -502,7 +574,22 @@ export default function InventoryView({
                     </span>
                   </td>
                   <td className="py-3.5 px-4 text-sky-400 font-bold">
-                    {item.partNumber}
+                    <div>{item.partNumber}</div>
+                    {item.barcode ? (
+                      <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1 font-normal">
+                        <Barcode size={10} />
+                        {item.barcode}
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleTriggerPhoneScan({ partId: item.id, partName: item.name })}
+                        className="text-[10px] text-amber-400 hover:text-amber-300 font-mono flex items-center gap-1 font-normal cursor-pointer transition-colors"
+                        title="Scan and assign barcode"
+                      >
+                        <Smartphone size={10} />
+                        <span>+ Assign Barcode</span>
+                      </button>
+                    )}
                   </td>
                   <td className="py-3.5 px-4 font-sans">
                     {item.supplierName ? (
@@ -537,14 +624,29 @@ export default function InventoryView({
                     <GlassBadge status={item.status} />
                   </td>
                   <td className="py-3.5 px-4 text-right">
-                    <GlassButton
-                      size="sm"
-                      variant="secondary"
-                      icon={<Edit2 size={13} />}
-                      onClick={() => handleOpenEditModal(item)}
-                    >
-                      Edit
-                    </GlassButton>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        onClick={() => {
+                          setRestockTarget(item);
+                          setInwardQty("10");
+                          setInwardCost(item.purchasePrice ? String(item.purchasePrice) : "");
+                          setInwardRack(item.rackNumber || "");
+                        }}
+                        className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-semibold border border-emerald-500/30 flex items-center gap-1 cursor-pointer transition-colors"
+                        title="Quick Goods Inward / Restock"
+                      >
+                        <PlusCircle size={13} />
+                        <span>Restock</span>
+                      </button>
+                      <GlassButton
+                        size="sm"
+                        variant="secondary"
+                        icon={<Edit2 size={13} />}
+                        onClick={() => handleOpenEditModal(item)}
+                      >
+                        Edit
+                      </GlassButton>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -691,11 +793,26 @@ export default function InventoryView({
                   value={editForm.rack_number}
                   onChange={(e) => setEditForm({ ...editForm, rack_number: e.target.value })}
                 />
-                <GlassInput
-                  label="Barcode (EAN-13 / Code-128)"
-                  value={editForm.barcode}
-                  onChange={(e) => setEditForm({ ...editForm, barcode: e.target.value })}
-                />
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-slate-300">
+                      Barcode (EAN-13 / Code-128)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => handleTriggerPhoneScan("EDIT_PART")}
+                      className="text-[10px] font-mono text-sky-400 hover:text-sky-300 flex items-center gap-1 cursor-pointer transition-colors"
+                      title="Scan barcode with phone"
+                    >
+                      <Smartphone size={11} />
+                      <span>Scan with Phone</span>
+                    </button>
+                  </div>
+                  <GlassInput
+                    value={editForm.barcode}
+                    onChange={(e) => setEditForm({ ...editForm, barcode: e.target.value })}
+                  />
+                </div>
               </div>
 
               <div className="pt-3 flex justify-end gap-2.5">
@@ -950,12 +1067,27 @@ export default function InventoryView({
                   value={newPart.rack_number}
                   onChange={(e) => setNewPart({ ...newPart, rack_number: e.target.value })}
                 />
-                <GlassInput
-                  label="Barcode"
-                  placeholder="e.g. 8901234001021"
-                  value={newPart.barcode}
-                  onChange={(e) => setNewPart({ ...newPart, barcode: e.target.value })}
-                />
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-slate-300">
+                      Barcode
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => handleTriggerPhoneScan("NEW_PART")}
+                      className="text-[10px] font-mono text-sky-400 hover:text-sky-300 flex items-center gap-1 cursor-pointer transition-colors"
+                      title="Scan barcode with phone"
+                    >
+                      <Smartphone size={11} />
+                      <span>Scan with Phone</span>
+                    </button>
+                  </div>
+                  <GlassInput
+                    placeholder="e.g. 8901234001021"
+                    value={newPart.barcode}
+                    onChange={(e) => setNewPart({ ...newPart, barcode: e.target.value })}
+                  />
+                </div>
               </div>
 
               <div className="pt-3 flex justify-end gap-2.5">
@@ -1091,6 +1223,189 @@ export default function InventoryView({
                 </GlassButton>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Active Barcode Assignment Banner if target is selected */}
+      {barcodeScanTarget !== null && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-4 fade-in">
+          <div className="glass-panel p-4 rounded-2xl bg-slate-900/95 border border-sky-400/40 shadow-2xl flex items-center gap-3 text-xs font-mono text-white max-w-sm">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+            <div className="flex-1">
+              <div className="font-bold text-sky-300">
+                {barcodeScanTarget === "NEW_PART"
+                  ? "Awaiting Barcode for New Part"
+                  : barcodeScanTarget === "EDIT_PART"
+                  ? "Awaiting Barcode for Edit Part"
+                  : `Assigning to: ${barcodeScanTarget.partName}`}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                {scannerToast || (isPhoneConnected ? "Point connected phone at barcode" : "Scan phone pairing required")}
+              </div>
+            </div>
+            {!isPhoneConnected && (
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(true)}
+                className="px-2.5 py-1.5 rounded-lg bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 text-[11px] font-bold border border-sky-500/40 cursor-pointer shrink-0"
+              >
+                Pair Phone
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setBarcodeScanTarget(null);
+                setScannerToast(null);
+              }}
+              className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Restock / Goods Inward Modal */}
+      {restockTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in">
+          <div className="glass-panel w-full max-w-lg p-6 rounded-3xl border border-emerald-500/30 bg-slate-900/95 shadow-2xl relative space-y-4">
+            <button
+              onClick={() => setRestockTarget(null)}
+              className="absolute top-4 right-4 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <X size={18} />
+            </button>
+
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Package className="text-emerald-400" size={20} />
+                <h3 className="text-base font-bold text-white">Goods Inward · Add Incoming Stock</h3>
+              </div>
+              <p className="text-xs text-slate-400">
+                Confirm incoming units received to update stock and log audit movements.
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 space-y-2">
+              <div className="text-sm font-bold text-white leading-snug">{restockTarget.name}</div>
+              <div className="grid grid-cols-2 gap-2 text-xs font-mono text-slate-300">
+                <div>
+                  <span className="text-slate-500 block text-[10px]">OEM PART NO:</span>
+                  <span className="font-semibold text-sky-300">{restockTarget.partNumber}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px]">CURRENT STOCK:</span>
+                  <span className="font-bold text-emerald-400">{restockTarget.quantity} Units on Shelf</span>
+                </div>
+              </div>
+            </div>
+
+            {restockError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-2">
+                <AlertCircle size={14} className="shrink-0" />
+                <span>{restockError}</span>
+              </div>
+            )}
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const qty = parseInt(inwardQty, 10);
+                if (isNaN(qty) || qty <= 0) {
+                  setRestockError("Quantity must be greater than zero.");
+                  return;
+                }
+                setIsRestocking(true);
+                setRestockError(null);
+                try {
+                  const cost = inwardCost ? parseFloat(inwardCost) : undefined;
+                  await partsApi.restock(restockTarget.id, {
+                    quantity_to_add: qty,
+                    purchase_price: !isNaN(cost as number) ? cost : undefined,
+                    rack_number: inwardRack.trim() || undefined,
+                  });
+                  setRestockTarget(null);
+                  if (onRefreshCatalog) onRefreshCatalog();
+                } catch (err: any) {
+                  setRestockError(err.message || "Failed to restock item.");
+                } finally {
+                  setIsRestocking(false);
+                }
+              }}
+              className="space-y-3.5"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[11px] font-mono text-slate-400 block mb-1">
+                    Inward Quantity *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={inwardQty}
+                    onChange={(e) => setInwardQty(e.target.value)}
+                    required
+                    className="glass-input h-10 w-full px-3 rounded-xl text-sm font-mono text-emerald-300 font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-mono text-slate-400 block mb-1">
+                    Purchase Cost (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={inwardCost}
+                    onChange={(e) => setInwardCost(e.target.value)}
+                    placeholder="Cost price"
+                    className="glass-input h-10 w-full px-3 rounded-xl text-sm font-mono text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-mono text-slate-400 block mb-1">
+                    Rack / Bin Locator
+                  </label>
+                  <input
+                    type="text"
+                    value={inwardRack}
+                    onChange={(e) => setInwardRack(e.target.value)}
+                    placeholder="e.g. B-04"
+                    className="glass-input h-10 w-full px-3 rounded-xl text-sm font-mono text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between text-xs font-mono">
+                <span className="text-slate-400">Resulting Stock Balance:</span>
+                <span className="text-emerald-400 font-bold">
+                  {restockTarget.quantity + (parseInt(inwardQty, 10) || 0)} Units
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <GlassButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setRestockTarget(null)}
+                >
+                  Cancel
+                </GlassButton>
+                <GlassButton
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  disabled={isRestocking}
+                  icon={<CheckCircle2 size={14} />}
+                >
+                  {isRestocking ? "Adding Stock..." : "Confirm & Add Stock"}
+                </GlassButton>
+              </div>
+            </form>
           </div>
         </div>
       )}

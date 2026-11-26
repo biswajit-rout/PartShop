@@ -52,7 +52,7 @@ cp .env.example .env
 # On Windows (PowerShell)
 Copy-Item .env.example .env
 ```
-*(Default values in `.env.example` are pre-configured for instant local development).*
+*(Default values in `.env.example` are pre-configured for instant local development. For mobile phone QR scanning, set `HOST_LAN_IP` to your PC's Wi-Fi IPv4 address from `ipconfig`, e.g. `192.168.1.9`).*
 
 #### 3. Start the Application
 Run Docker Compose in detached mode:

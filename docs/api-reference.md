@@ -219,6 +219,31 @@ Updates existing spare part attributes, price tiers, physical stock level, rack 
 
 ---
 
+### 3.5 Fast Goods Inward / Restock Spare Part
+Quickly restocks an existing spare part from shipment delivery or inward scan: increments current quantity on hand, optionally updates acquisition purchase cost or rack locator, and logs an immutable `PURCHASE_IN` entry in the `stock_movements` audit ledger.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/parts/{part_id}/restock`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SparePartRestock`)**:
+  ```json
+  {
+    "quantity_to_add": 10,
+    "purchase_price": 210.00,
+    "rack_number": "Rack-B04"
+  }
+  ```
+- **Validation Rules**:
+  - `quantity_to_add`: Integer greater than 0 (`HTTP 400` if <= 0).
+  - `purchase_price`: Optional updated purchase cost.
+  - `rack_number`: Optional updated shelf locator string.
+- **Response (`200 OK`)**: Updated `SparePartResponse` object with incremented `quantity`.
+- **Error Codes**:
+  - `404 Not Found`: Spare part with ID not found.
+  - `400 Bad Request`: Invalid quantity to add.
+
+---
+
 ## 4. POS Counter Billing & Invoices (`/api/v1/billing`)
 
 ### 4.1 Process Counter Checkout
@@ -338,7 +363,7 @@ Retrieves aggregated daily revenue, discount totals, GST tax liability, and sett
 
 - **Method**: `GET`
 - **Route**: `/api/v1/reports/daily-sales`
-- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`)
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
 - **Query Parameters**:
   - `target_date` (string, optional, format: `YYYY-MM-DD`, default: today): Date for the reconciliation report.
 - **Response (`200 OK`)**:
@@ -423,6 +448,33 @@ Retrieves all spare parts whose stock on hand has dropped to or below their conf
       "part_number": "SP-NGK-CPR8",
       "rack_number": "Rack-A2",
       "quantity": 2,
+      "min_stock_alert": 5
+    }
+  ]
+  ```
+
+---
+
+### 6.4 Rolling Weekly Sales vs Purchases Trend
+Retrieves a rolling 7-day time series comparing counter sales revenue with inventory purchase inward costs.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/reports/weekly-trend`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Query Parameters**:
+  - `days` (integer, optional, default: `7`, max: `30`): Number of rolling days.
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "day": "Thu",
+      "date": "2026-11-26",
+      "sales": 3541.18,
+      "purchase": 0.0
+    }
+  ]
+  ```
+
 ---
 
 ## 7. Item Brands Master API (`/api/v1/brands`)
@@ -675,4 +727,167 @@ Returns a paginated list of all spare parts mapped to a specific wholesale suppl
   - `limit` (integer, default: `100`, max: `500`)
 - **Response (`200 OK`)**: `PaginatedSpareParts` schema with `total`, `items`, `page`, and `pages`.
 
+---
 
+## 10. Mobile Barcode Scanner & WebSockets Gateway (`/api/v1/scanner`)
+
+### 10.1 Get Host Network Information
+Discovers the host machine's primary local area network (LAN) IP addresses for generating mobile device pairing QR codes. Respects `HOST_LAN_IP` environment variable if configured, and strictly filters out Docker virtual bridge subnets (`172.16.x.x` - `172.31.x.x`) and loopbacks.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/scanner/network-info`
+- **Authentication**: Public
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "primary_ip": "192.168.1.9",
+    "all_ips": [
+      "192.168.1.9"
+    ],
+    "is_docker_container_ip": false,
+    "frontend_port": 3000,
+    "backend_port": 8001,
+    "suggested_scan_url": "http://192.168.1.9:3000/scan"
+  }
+  ```
+
+### 10.2 Scanner WebSocket Bridge
+Bidirectional real-time WebSocket connection bridging the desktop counter terminal and multiple mobile smartphone camera scanners simultaneously. Maintains a live connected devices roster with scan count telemetry.
+
+- **Protocol**: `WebSocket (WS / WSS)`
+- **Route**: `/api/v1/scanner/ws/{session_id}`
+- **Authentication**: Session-token based (`session_id`)
+- **Events & Message Payloads**:
+  1. **Device Connected Event** (Sent by Mobile on open):
+     ```json
+     {
+       "type": "DEVICE_CONNECTED",
+       "device_id": "dev_4k9j2x",
+       "device_type": "mobile",
+       "device_name": "iPhone 15",
+       "session_id": "sess_94a2b1"
+     }
+     ```
+  2. **Roster Updated Event** (Server broadcast upon connection, disconnection, or scan count increment):
+     ```json
+     {
+       "type": "ROSTER_UPDATED",
+       "session_id": "sess_94a2b1",
+       "devices": [
+         {
+           "device_id": "dev_4k9j2x",
+           "device_name": "iPhone 15",
+           "connected_at": 1732626000000,
+           "scan_count": 4
+         }
+       ],
+       "new_device": {
+         "device_id": "dev_4k9j2x",
+         "device_name": "iPhone 15"
+       }
+     }
+     ```
+  3. **Get Roster Query** (Sent by Desktop on open or refresh):
+     ```json
+     {
+       "type": "GET_ROSTER",
+       "session_id": "sess_94a2b1"
+     }
+     ```
+  4. **Barcode Scanned Event** (Sent by Mobile on barcode / QR code detection):
+     ```json
+     {
+       "type": "BARCODE_SCANNED",
+       "barcode": "8901234009083",
+       "session_id": "sess_94a2b1",
+       "device_id": "dev_4k9j2x",
+       "device_name": "iPhone 15",
+       "timestamp": 1732626050000
+     }
+     ```
+  5. **Device Disconnected Event** (Server broadcast when a mobile socket drops):
+     ```json
+     {
+       "type": "DEVICE_DISCONNECTED",
+       "session_id": "sess_94a2b1",
+       "device": {
+         "device_id": "dev_4k9j2x",
+         "device_name": "iPhone 15"
+       }
+     }
+     ```
+  6. **Ping / Pong Keep-Alive** (Client / Server Heartbeat every 15s):
+     - Client: `{"type": "PING"}`
+     - Server: `{"type": "PONG"}`
+
+
+
+
+---
+
+## 11. Shop Operating Expenses API (`/api/v1/expenses`)
+
+### 11.1 Record an Operating Expense
+Logs an operational overhead expense (e.g. tea/refreshments, electricity, shop rent, staff wages).
+
+- **Method**: `POST`
+- **Route**: `/api/v1/expenses`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`ExpenseCreate`)**:
+  ```json
+  {
+    "category": "TEA_REFRESHMENT",
+    "amount": 120.00,
+    "description": "Evening snacks for staff",
+    "expense_date": "2026-11-26"
+  }
+  ```
+- **Validation Rules**:
+  - `category`: One of `RENT`, `ELECTRICITY`, `TEA_REFRESHMENT`, `SALARY_WAGES`, `MAINTENANCE`, `TRANSPORT`, `STATIONERY`, `OTHER`.
+  - `amount`: Number greater than 0.
+  - `description`: Optional text details.
+  - `expense_date`: Valid date string (`YYYY-MM-DD`). Defaults to current date if omitted.
+- **Response (`201 Created`)**: `ExpenseResponse` object.
+
+### 11.2 List Expenses
+Queries logged expenses with date-range filtering and category filtering.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/expenses`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Query Parameters**:
+  - `category` (string, optional): Filter by category enum.
+  - `start_date` (string, optional, `YYYY-MM-DD`): Inclusive start date.
+  - `end_date` (string, optional, `YYYY-MM-DD`): Inclusive end date.
+  - `skip` (integer, default: 0): Pagination offset.
+  - `limit` (integer, default: 100): Maximum records returned.
+- **Response (`200 OK`)**: List of `ExpenseResponse` objects.
+
+### 11.3 Get Daily Expense & Profit Summary
+Aggregates total daily operational expenses, provides category-wise breakdowns, and computes estimated net profit ($\text{Total Counter Sales} - \text{Total Expenses}$).
+
+- **Method**: `GET`
+- **Route**: `/api/v1/expenses/daily-summary`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Query Parameters**:
+  - `target_date` (string, optional, `YYYY-MM-DD`, default: today).
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "date": "2026-11-26",
+    "total_expense": 120.00,
+    "categories": {
+      "TEA_REFRESHMENT": 120.00
+    },
+    "total_sales": 3541.18,
+    "estimated_profit": 3421.18
+  }
+  ```
+
+### 11.4 Delete Expense Record
+Deletes an expense entry by ID.
+
+- **Method**: `DELETE`
+- **Route**: `/api/v1/expenses/{expense_id}`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`)
+- **Response (`204 No Content`)**

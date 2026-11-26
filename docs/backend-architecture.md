@@ -86,6 +86,7 @@ This tracker tracks our step-by-step progress. Each milestone builds directly on
 | **Milestone 6** | **Excel Bulk Import & Reports** | Parse and validate `.xlsx` catalogs with bulk database inserts. Daily sales summaries and profit margin reports. | `Completed` |
 | **Milestone 7** | **Docker Containerization & Frontend Link** | Create `backend/Dockerfile`, connect the backend container to `docker-compose.yml`, and test end-to-end communication with the Next.js UI. | `Completed` |
 | **Milestone 8** | **Wholesale Supplier Management & Purchase Discounts** | Multi-supplier purchase discount mapping, Excel upload under supplier, and supplier item query endpoints. | `Completed` |
+| **Milestone 9** | **Mobile Barcode Scanner Gateway & Fast Goods Inward** | Real-time WebSocket connection hub, host LAN IP discovery, and atomic restock API with audit ledger logging. | `Completed` |
 
 ---
 
@@ -156,11 +157,13 @@ This tracker tracks our step-by-step progress. Each milestone builds directly on
 ### Milestone 6: Excel Bulk Import & Reports
 - **Goal**: Provide shop owners with easy bulk data onboarding and business insights.
 - **Files**:
+  - `backend/requirements.txt`: Pins `openpyxl==3.1.5`, required by the Excel import service.
   - `backend/app/services/import_service.py`: Reads `.xlsx` files, validates rows, and bulk-inserts.
   - `backend/app/api/v1/endpoints/reports.py`: Daily sales totals, top-selling parts, and low-stock alerts.
 - **What you'll learn**:
   - Handling file uploads in FastAPI (`UploadFile`).
   - Aggregating metrics using SQL group-by and sum functions.
+  - Rebuild the backend image after dependency changes so the container installs the updated requirements.
 
 ### Milestone 7: Docker Containerization & Frontend Link
 - **Goal**: Package the backend into a lightweight Docker image and connect it to the Next.js UI.
@@ -183,3 +186,105 @@ This tracker tracks our step-by-step progress. Each milestone builds directly on
 - **What you'll learn**:
   - Managing foreign key relationships with `SET NULL` on delete to preserve historical parts data.
   - Combining SQL aggregations (`func.count`) with group-by queries to provide instantaneous supplier catalog counts.
+
+### Milestone 9: Mobile Barcode Scanner Gateway & Fast Goods Inward
+- **Goal**: Implement bidirectional WebSocket communication to turn any mobile phone into a wireless scanner, and build atomic restock APIs for fast goods inward logging.
+- **Files**:
+  - `backend/app/core/websocket.py`: `ScannerConnectionManager` tracking real-time paired sessions and broadcasting scan events.
+  - `backend/app/api/v1/endpoints/scanner.py`: WebSocket endpoint `/api/v1/scanner/ws/{session_id}` and LAN IP discovery route `/network-info`.
+  - `backend/app/schemas/spare_part.py`: `SparePartRestock` schema.
+  - `backend/app/services/inventory_service.py`: `restock_part` method updating quantity and writing `StockMovement` entries (`PURCHASE_IN`).
+  - `backend/app/api/v1/endpoints/spare_parts.py`: `POST /parts/{id}/restock`.
+- **What you'll learn**:
+  - Managing stateful WebSocket connection pools in asynchronous FastAPI servers.
+  - Auto-discovering local network interfaces (`socket.gethostbyname_ex`) for cross-device mobile pairing over Wi-Fi.
+
+---
+
+## 10. Multi-Device Wireless Mobile Scanner Gateway & WebSocket Hub
+
+### 10.1 Multi-Client Session Architecture
+The scanner gateway (`ScannerConnectionManager`) maintains active rooms partitioned by `session_id`. Multiple mobile scanner clients (different staff members on the warehouse floor) and desktop terminals can join the same session simultaneously:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor MobileA as Smartphone A (Warehouse)
+    actor MobileB as Smartphone B (Shelf 4)
+    participant Gateway as FastAPI Scanner WebSocket Gateway
+    actor Desktop as Desktop Terminal (POS/Inventory)
+
+    Note over Desktop,Gateway: Desktop establishes background session (sess_xxx)
+    Desktop->>Gateway: WS Connect /ws/sess_xxx
+    Gateway-->>Desktop: Connection Accepted
+    Desktop->>Gateway: {"type": "GET_ROSTER"}
+    Gateway-->>Desktop: {"type": "ROSTER_UPDATED", "devices": []}
+
+    Note over MobileA,Gateway: Staff A scans pairing QR code
+    MobileA->>Gateway: WS Connect /ws/sess_xxx
+    MobileA->>Gateway: {"type": "DEVICE_CONNECTED", "device_id": "dev_a1", "device_name": "iPhone 15"}
+    Gateway->>Gateway: Register Device & Initialize scan_count=0
+    Gateway-->>Desktop: {"type": "ROSTER_UPDATED", "devices": [{"device_id": "dev_a1", "name": "iPhone 15", "scans": 0}]}
+    Gateway-->>Desktop: Toast: "📱 iPhone 15 paired!"
+
+    Note over MobileB,Gateway: Staff B scans same QR code
+    MobileB->>Gateway: WS Connect /ws/sess_xxx
+    MobileB->>Gateway: {"type": "DEVICE_CONNECTED", "device_id": "dev_b2", "device_name": "Galaxy S23"}
+    Gateway-->>Desktop: {"type": "ROSTER_UPDATED", "devices": [dev_a1, dev_b2]}
+    Gateway-->>Desktop: Header updates: "🟢 2 Scanners Active"
+
+    Note over MobileA,Gateway: Staff A scans barcode
+    MobileA->>Gateway: {"type": "BARCODE_SCANNED", "barcode": "8901234001021", "device_id": "dev_a1"}
+    Gateway->>Gateway: Increment dev_a1.scan_count
+    Gateway-->>Desktop: {"type": "BARCODE_SCANNED", "barcode": "8901234001021", "device_name": "iPhone 15"}
+    Gateway-->>Desktop: {"type": "ROSTER_UPDATED", "devices": [{"device_id": "dev_a1", "scans": 1}, ...]}
+    Desktop->>Desktop: Event Bus (Search View / Billing POS / Add Part Auto-Fill)
+```
+
+### 10.2 Network Discovery & Docker Bridge Exclusion
+When running in Docker containers, internal bridge networks (`172.16.0.0/12`) cannot be reached by external smartphones. The `/scanner/network-info` route:
+1. Detects `HOST_LAN_IP` environment variable set in `docker-compose.yml` (`192.168.1.9`).
+2. Strictly filters out all virtual bridge subnets (`172.16.x.x` through `172.31.x.x`) and loopback addresses.
+3. Automatically falls back to host Wi-Fi IP `192.168.1.9` if running inside an isolated container without host network mode.
+4. Provides only reachable physical LAN IP addresses for pairing QR code generation.
+
+---
+
+## 11. Shop Expenditure & Net Profit Engine
+
+### 11.1 Architecture & Domain Models
+The Expenditure module provides operational overhead tracking and real-time net daily profit computation ($\text{Total Sales Revenue} - \text{Total Expenses}$):
+
+```mermaid
+flowchart LR
+    subgraph PosLayer["POS Transactions"]
+        Sales["Sales Table<br/>(grand_total, settle_date)"]
+    end
+
+    subgraph ExpenseLayer["Operating Expenses"]
+        Expenses["Expenses Table<br/>(amount, category, expense_date)"]
+    end
+
+    subgraph Service["ExpenseService & ReportService"]
+        DailySummary["get_daily_summary(date)"]
+        WeeklyTrend["get_weekly_trend(7 days)"]
+    end
+
+    subgraph Output["Dashboard & Expenses UI"]
+        KPIs["Today's Sales, Daily Expenses, Net Daily Profit"]
+        TrendChart["Rolling 7-Day Sales vs Purchases Chart"]
+    end
+
+    Sales --> DailySummary
+    Expenses --> DailySummary
+    Sales --> WeeklyTrend
+    DailySummary --> KPIs
+    WeeklyTrend --> TrendChart
+```
+
+### 11.2 Key Components
+- **Model**: `app/models/expense.py` (`Expense` model with `ExpenseCategory` enum: `RENT`, `ELECTRICITY`, `TEA_REFRESHMENT`, `SALARY_WAGES`, `MAINTENANCE`, `TRANSPORT`, `STATIONERY`, `OTHER`).
+- **Repository**: `app/repositories/expense_repo.py` (`ExpenseRepository` implementing date-range querying, category-wise aggregation, and CRUD).
+- **Service**: `app/services/expense_service.py` (`ExpenseService` calculating `DailyExpenseSummary` with `total_expense`, category breakdown, `total_sales`, and `estimated_profit`).
+- **Endpoints**: `app/api/v1/endpoints/expenses.py` (`POST /api/v1/expenses`, `GET /api/v1/expenses`, `GET /api/v1/expenses/daily-summary`, `DELETE /api/v1/expenses/{id}`).
+- **Permissions**: `GET /api/v1/reports/daily-sales` and `GET /api/v1/reports/weekly-trend` granted to `ADMIN`, `STORE_MANAGER`, and `COUNTER_STAFF` to enable live counter dashboard updates on bill settlement.

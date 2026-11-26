@@ -3,7 +3,7 @@
 > **Document Purpose**: Technical architecture specification for container design, orchestration, volume management, and deployment topology.  
 > **Source of Truth**: Active codebase (`d:/Programming/PartShop`)  
 > **Governance**: Maintained according to rules established in `AGENTS.md`.  
-> **Last Updated**: 2026-11-20  
+> **Last Updated**: 2026-11-26  
 
 ---
 
@@ -177,6 +177,7 @@ flowchart LR
   - `POSTGRES_HOST`: `postgres`
   - `POSTGRES_PORT`: `5432`
   - `SECRET_KEY`: `${BACKEND_SECRET_KEY}`
+  - `HOST_LAN_IP`: `${HOST_LAN_IP:-}` (Explicit Wi-Fi / Ethernet LAN IP for mobile scanner pairing; prevents advertising unroutable Docker 172.x.x.x bridge IPs)
   ```yaml
   profiles:
     - backend
@@ -231,7 +232,14 @@ Unlike the backend service which uses a live volume mount (`./backend:/app`) wit
 docker compose up -d --build frontend
 ```
 
-### 6.6 Clean Teardown
+### 6.6 Rebuilding Backend After Dependency Changes
+The backend image installs Python packages from `backend/requirements.txt` during its build. For example, Excel imports use the pinned `openpyxl==3.1.5` dependency. If the running container was created before that dependency was included, rebuild and recreate the backend container:
+```powershell
+docker compose up -d --build backend
+```
+The `./backend:/app` development volume mounts source files but does not install Python packages into the image.
+
+### 6.7 Clean Teardown
 ```powershell
 # Stop containers keeping data intact
 docker compose down

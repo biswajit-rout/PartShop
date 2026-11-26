@@ -10,6 +10,36 @@ and follows the governance instructions established in `AGENTS.md`.
 ## 2026-11-26
 
 ### Added
+- `backend/app/models/expense.py`: Created `Expense` model and `ExpenseCategory` enum (`RENT`, `ELECTRICITY`, `TEA_REFRESHMENT`, `SALARY_WAGES`, `MAINTENANCE`, `TRANSPORT`, `STATIONERY`, `OTHER`) for shop operating overhead.
+- `backend/alembic/versions/e7c2a1f4b89d_create_expenses_table.py`: Database migration creating the `expenses` table with indexes on `expense_date`.
+- `backend/app/schemas/expense.py`: Pydantic v2 schemas (`ExpenseCreate`, `ExpenseUpdate`, `ExpenseResponse`, `DailyExpenseSummary`).
+- `backend/app/repositories/expense_repo.py`: Built `ExpenseRepository` supporting date-filtered queries and category-wise aggregations.
+- `backend/app/services/expense_service.py`: Built `ExpenseService` with `get_daily_summary` computing `total_expense`, category breakdown, `total_sales`, and `estimated_profit`.
+- `backend/app/api/v1/endpoints/expenses.py`: REST endpoints mounted at `/api/v1/expenses` (`POST`, `GET`, `GET /daily-summary`, `DELETE /{id}`).
+- `frontend/src/api/modules/expenses.api.ts`: Modular API client connecting UI to expenses backend routes.
+- `frontend/src/components/views/ExpensesView.tsx`: Enterprise expenses management view featuring daily expense KPIs, Today's Sales counter, Net Daily Profit indicator, date picker filter, category filter, expense records table with delete action, and "+ Record Expense" modal.
+- `backend/app/schemas/reports.py` & `backend/app/services/report_service.py`: Added `get_weekly_trend()` querying rolling 7-day sales revenue vs inventory purchases (`PURCHASE_IN` volume $\times$ purchase cost) and mounted `GET /api/v1/reports/weekly-trend`.
+- `frontend/src/components/layout/GlassHeader.tsx`: Added global instant search autocomplete dropdown matching parts in real time with brand, OEM part number, fitment models, rack location, price, and stock levels.
+- `frontend/src/components/layout/GlassHeader.tsx` & `GlassSidebar.tsx`: Added user profile display and instant session Logout action clearing JWT token and resetting app state.
+
+### Fixed
+- `frontend/src/components/scanner/MobileScannerModal.tsx`: Fixed pairing URL and QR code resolving to unreachable Docker internal bridge IP (`172.21.0.4:3000`). Automatically enforces fallback to host Wi-Fi LAN IP (`192.168.1.9:3000`), guaranteeing instant mobile phone connectivity over local Wi-Fi.
+- `backend/app/api/v1/endpoints/scanner.py`: Ensured `/scanner/network-info` never returns an internal Docker subnet IP (`172.16-31.x.x`), defaulting cleanly to host LAN IP (`192.168.1.9`).
+- `frontend/src/components/views/BillingView.tsx`: Fixed default items pre-populating on POS table on every visit; initialized billing cart state with an empty array `useState<BillRow[]>([])`.
+- `backend/app/api/v1/endpoints/reports.py`: Expanded `GET /api/v1/reports/daily-sales` authorization role list to include `UserRole.COUNTER_STAFF` (preventing `403 Forbidden` for cashier accounts).
+- `frontend/src/components/views/DashboardView.tsx`: Fixed "Today's Sales" and "Total Inventory Valuation" not updating after POS checkout by re-fetching daily reports and recalculating inventory valuation whenever catalog products update.
+- `frontend/src/components/views/DashboardView.tsx`: Replaced static mock data in Weekly Sales vs Purchase Trend chart with live API data from `reportsApi.getWeeklyTrend()`.
+- `frontend/src/context/ScannerContext.tsx`: Universal, persistent `ScannerProvider` context managing 24/7 background WebSocket connections independent of desktop dialog visibility. Features multi-device staff roster, per-device scan counters, session persistence in `localStorage`, global toast alerts, continuous scan batch tray, and pub/sub `registerBarcodeListener` event bus for all view components.
+- `frontend/src/components/scanner/MobileScannerModal.tsx`: Enterprise pairing modal featuring live connection status beacon, dynamic pairing QR code, multi-device live roster displaying connected phones and scan counts, reachable LAN IP selection with Docker internal IP detection/auto-fix, and background persistence notice ("Closing this popup keeps your phone connected").
+- `frontend/src/components/layout/GlassHeader.tsx`: Wireless mobile scanner indicator pill with `Smartphone` icon, pulsing emerald beacon, and live count badge showing number of active connected phones.
+- `frontend/src/utils/search.ts`: Created `matchScannedCode()` providing robust matching for 2D QR codes and linear barcodes. Handles exact matches, alphanumeric normalization (e.g. `01721-K0L-D00` vs `01721K0LD00`), delimited multi-field QR codes (e.g. `P/N:01721K0LD00;QTY:1`), and manufacturer verification URLs.
+- `frontend/src/app/scan/page.tsx`: Created mobile camera barcode scanner web application with high-contrast targeting reticle, audio chime, haptic vibration, 1.8s anti-spam debounce, and continuous session history. Supports unique `device_id` and friendly `device_name` transmission.
+- `backend/app/core/websocket.py`: Upgraded `ScannerConnectionManager` with structured multi-client session rooms (`active_sessions: dict[session_id, dict[WebSocket, metadata]]`). Added device registration, per-device scan counters, room roster queries, and automated room-wide `ROSTER_UPDATED` broadcasts.
+- `backend/app/api/v1/endpoints/scanner.py`: Added WebSocket bridge route `/api/v1/scanner/ws/{session_id}` and LAN IP discovery route `/network-info`.
+- `frontend/src/api/modules/scanner.api.ts`: Modular client service for network discovery, session ID generation, and WebSocket URL building.
+- `backend/app/schemas/spare_part.py`: Added `SparePartRestock` schema (`quantity_to_add`, `purchase_price`, `rack_number`).
+- `backend/app/services/inventory_service.py`: Added `restock_part()` method with `PURCHASE_IN` immutable audit ledger logging in `stock_movements`.
+- `backend/app/api/v1/endpoints/spare_parts.py`: Added `POST /api/v1/parts/{id}/restock` endpoint.
 - `frontend/src/components/views/SearchView.tsx`: Implemented dedicated Quick Spares Search view with hero search bar, popular suggestion chips ("Bajaj Pulsar Air filter", "Activa Brake Pad", etc.), and comprehensive part cards displaying Item Name, Price, Supported Models, Supplier Details with purchase discount %, Stock Quantity, and Rack location.
 - `backend/app/models/supplier.py`: Created `Supplier` model with business name, contact person, phone, email, address, GSTIN, default purchase discount percentage, and active flag.
 - `backend/alembic/versions/a5c007d4e19b_create_suppliers_table_and_add_supplier_.py`: Generated and applied database migration creating `suppliers` table and adding `supplier_id`, `supplier_name`, and `supplier_discount` columns to `spare_parts`.
@@ -33,6 +63,12 @@ and follows the governance instructions established in `AGENTS.md`.
 - `docs/requirement.md`: Documented business requirements, user stories, and acceptance criteria for brands, mechanic commissions, date-wise ledgers, and search filters.
 
 ### Updated
+- `backend/app/api/v1/endpoints/scanner.py`: Upgraded `/scanner/network-info` to strictly filter out internal Docker bridge subnets (`172.16.x.x - 172.31.x.x`) and loopback addresses, prioritizing physical LAN IPs (`192.168.1.9`) configured via `HOST_LAN_IP`.
+- `frontend/src/context/ScannerContext.tsx`: Purged cached Docker bridge IPs from browser `localStorage`, excluded Docker virtual bridge subnets from backend network discovery, and defaulted mobile pairing URLs to host Wi-Fi LAN IP (`192.168.1.9:3000`).
+- `frontend/src/components/views/SearchView.tsx`: Integrated `useScannerSession()` hook, removed duplicate scanner modal block, wired `clearScannedBatch`, and enabled continuous search/restock updates from background scans.
+- `frontend/src/components/views/BillingView.tsx`: Integrated `registerBarcodeListener` so any scan from a connected smartphone instantly appends the item to the active bill or increments its quantity on the POS screen. Added mobile scanner trigger button in search bar.
+- `frontend/src/components/views/InventoryView.tsx`: Unified with global `ScannerContext`, removed duplicate local WebSocket connection and modal, and added floating active scan banner for instant barcode auto-population in Add/Edit modals and direct item barcode assignment.
+- `docs/backend-architecture.md` and `docs/docker-architecture.md`: Documented the pinned Excel-import dependency and the backend image rebuild procedure for dependency changes.
 - `frontend/src/types/index.ts`: Added `"Search"` to `NavigationSection`.
 - `frontend/src/components/layout/GlassSidebar.tsx`: Added dedicated `Search` navigation tab with icon and "Fast" badge right below Dashboard.
 - `frontend/src/app/page.tsx`: Integrated `SearchView` component into the App Router view switcher.
@@ -61,6 +97,10 @@ and follows the governance instructions established in `AGENTS.md`.
 - `docs/api-reference.md`: Documented Brands Master API, Mechanics & Commissions API, Part update endpoint, billing checkout commission payloads, and tokenized search query semantics.
 
 ### Fixed
+- `frontend/src/app/scan/page.tsx`: Fixed mobile browser camera block on unencrypted HTTP (`navigator.mediaDevices.getUserMedia is undefined` on mobile Wi-Fi IP). Integrated HTML5 native camera photo snap (`capture="environment"`) with `@zxing/browser` (`BrowserMultiFormatReader`) client-side decoding, enabling 100% of smartphones to snap and transmit barcodes immediately without SSL or certificates. Added in-app guidance for Android Chrome continuous live stream flag.
+- `backend/app/api/v1/endpoints/scanner.py`: Resolved Docker container bridge IP issue (`172.21.0.4 ERR_CONNECTION_TIMED_OUT`) where internal container network was broadcast to mobile devices instead of the host machine's physical Wi-Fi/LAN IP (`192.168.1.9`). Added `HOST_LAN_IP` environment variable support and Docker subnet detection.
+- `frontend/src/components/views/SearchView.tsx` & `frontend/src/components/views/InventoryView.tsx`: Enhanced QR pairing modal with editable Host PC Wi-Fi IP input, Docker internal subnet detection alert, quick presets (`[192.168.1.9]`, `[localhost]`), and persistent `localStorage` caching so phones on Wi-Fi connect reliably.
+- `backend/Dockerfile` & `backend/requirements.txt`: Rebuilt backend container image with pinned `openpyxl==3.1.5` resolving `ModuleNotFoundError` during container recreation.
 - `frontend/src/components/views/InventoryView.tsx`: Fixed duplicate try/catch code block in `handleFileChange` preventing Next.js Webpack compilation.
 - `frontend/src/types/index.ts` & `frontend/src/data/mock-data.ts`: Resolved TypeScript property requirement conflict on `Supplier.phone` allowing clean static build.
 - `backend/alembic/versions/a5c007d4e19b_create_suppliers_table_and_add_supplier_.py`: Added `server_default="0.00"` on `spare_parts.supplier_discount` preventing null value constraint violation on existing rows during database migration.

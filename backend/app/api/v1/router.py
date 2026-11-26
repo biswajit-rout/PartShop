@@ -1,5 +1,16 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, spare_parts, billing, imports, reports, brands, mechanics, suppliers
+from app.api.v1.endpoints import (
+    auth,
+    spare_parts,
+    billing,
+    imports,
+    reports,
+    brands,
+    mechanics,
+    suppliers,
+    scanner,
+    expenses,
+)
 
 api_router = APIRouter()
 
@@ -26,3 +37,9 @@ api_router.include_router(mechanics.router)
 
 # Register Suppliers endpoints under /api/v1/suppliers
 api_router.include_router(suppliers.router)
+
+# Register Mobile Barcode Scanner & WebSocket gateway under /api/v1/scanner
+api_router.include_router(scanner.router)
+
+# Register Operational Expenses & Profit endpoints under /api/v1/expenses
+api_router.include_router(expenses.router)

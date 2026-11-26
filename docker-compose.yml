@@ -67,6 +67,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-partshop_secret_change_me}
       - POSTGRES_DB=${POSTGRES_DB:-partshop_db}
       - SECRET_KEY=${BACKEND_SECRET_KEY:-partshop_default_jwt_secret_key_change_in_production}
+      - HOST_LAN_IP=${HOST_LAN_IP:-}
     depends_on:
       postgres:
         condition: service_healthy

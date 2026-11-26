@@ -9,6 +9,7 @@ from app.schemas.spare_part import (
     SparePartUpdate,
     SparePartResponse,
     PaginatedSpareParts,
+    SparePartRestock,
 )
 from app.services.inventory_service import InventoryService
 from app.api.deps import get_current_user, require_role
@@ -115,3 +116,20 @@ async def update_spare_part(
     """Update spare part details, pricing, stock levels, or rack location."""
     service = InventoryService(db)
     return await service.update_part(part_id, part_update)
+
+
+# 6. Fast Goods Inward / Restock (Admin, Store Manager & Counter Staff)
+@router.post(
+    "/{part_id}/restock",
+    response_model=SparePartResponse,
+    dependencies=[Depends(require_role(
+        [UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
+)
+async def restock_spare_part(
+    part_id: int,
+    restock_in: SparePartRestock,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Fast goods inward: increment stock level and log audit ledger."""
+    service = InventoryService(db)
+    return await service.restock_part(part_id, restock_in)

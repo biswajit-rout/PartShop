@@ -65,3 +65,11 @@ class PaginatedSpareParts(BaseModel):
     skip: int
     limit: int
     items: list[SparePartResponse]
+
+
+# 6. Schema for Fast Goods Inward / Restock (POST)
+class SparePartRestock(BaseModel):
+    quantity_to_add: int
+    purchase_price: Decimal | None = None
+    rack_number: str | None = None
+

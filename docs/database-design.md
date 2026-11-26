@@ -136,6 +136,16 @@ erDiagram
         timestamptz created_at
     }
 
+    expenses {
+        int id PK
+        varchar category "RENT, ELECTRICITY, TEA, WAGES, etc."
+        numeric amount "10, 2"
+        text description
+        date expense_date "Indexed"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
     users ||--o{ sales : "processes"
     mechanics ||--o{ sales : "credited in"
     mechanics ||--|{ mechanic_brand_commissions : "has"
@@ -296,6 +306,19 @@ Wholesale suppliers and authorized spare parts distributors.
 | `is_active` | `BOOLEAN` | `NOT NULL`, Default: `TRUE` | Operational active status flag |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Record creation timestamp (UTC) |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
+
+### 3.10 `expenses` Table
+Shop operational overhead and daily counter expenditure ledger (Migration: `e7c2a1f4b89d`).
+
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | `PRIMARY KEY`, `AUTO_INCREMENT` | Unique expense transaction ID |
+| `category` | `ENUM(ExpenseCategory)` | `NOT NULL` | `RENT`, `ELECTRICITY`, `TEA_REFRESHMENT`, `SALARY_WAGES`, `MAINTENANCE`, `TRANSPORT`, `STATIONERY`, `OTHER` |
+| `amount` | `NUMERIC(10, 2)` | `NOT NULL` | Expense cost amount in INR (`₹`) |
+| `description` | `TEXT` | `NULLABLE` | Optional context, vendor, or purpose remarks |
+| `expense_date` | `DATE` | `NOT NULL`, `INDEXED` | Transaction accounting date |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Creation timestamp (UTC) |
+| `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Last modification timestamp (UTC) |
 
 ---
 

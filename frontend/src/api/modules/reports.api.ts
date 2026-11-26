@@ -35,6 +35,13 @@ export interface LowStockItem {
   min_stock_alert: number;
 }
 
+export interface WeeklyTrendPoint {
+  day: string;
+  date: string;
+  sales: number;
+  purchase: number;
+}
+
 export const reportsApi = {
   /**
    * Daily sales reconciliation report.
@@ -59,5 +66,12 @@ export const reportsApi = {
    */
   async getLowStock(): Promise<LowStockItem[]> {
     return apiClient<LowStockItem[]>("/reports/low-stock");
+  },
+
+  /**
+   * 7-day rolling sales vs purchase trend for financial flow charts.
+   */
+  async getWeeklyTrend(): Promise<WeeklyTrendPoint[]> {
+    return apiClient<WeeklyTrendPoint[]>("/reports/weekly-trend");
   },
 };

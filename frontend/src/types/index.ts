@@ -3,6 +3,7 @@ export type NavigationSection =
   | "Search"
   | "Inventory"
   | "Billing"
+  | "Expenses"
   | "Suppliers"
   | "Mechanics"
   | "Reports"

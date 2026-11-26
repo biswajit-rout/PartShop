@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { NavigationSection, SparePart } from "@/types";
 import { salesTrend, brandDistribution } from "@/data/mock-data";
 import { formatRupees, formatDate } from "@/utils/formatters";
-import { reportsApi, DailySalesSummary, TopSellingPart } from "@/api";
+import { reportsApi, DailySalesSummary, TopSellingPart, WeeklyTrendPoint } from "@/api";
 import PageHeading from "@/components/common/PageHeading";
 import GlassKPICard from "@/components/ui/glass/GlassKPICard";
 import GlassBadge from "@/components/ui/glass/GlassBadge";
@@ -46,6 +46,7 @@ export default function DashboardView({
   const [currentDateStr, setCurrentDateStr] = useState("Live POS Session");
   const [dailySales, setDailySales] = useState<DailySalesSummary | null>(null);
   const [topParts, setTopParts] = useState<TopSellingPart[]>([]);
+  const [weeklyTrend, setWeeklyTrend] = useState<WeeklyTrendPoint[]>([]);
 
   // Real inventory computations from live products
   const lowStockCount = products.filter(
@@ -53,11 +54,11 @@ export default function DashboardView({
   ).length;
 
   const totalInventoryValuation = products.reduce(
-    (acc, p) => acc + (p.purchasePrice * p.quantity),
+    (acc, p) => acc + ((p.purchasePrice || p.sellingPrice || 0) * (p.quantity || 0)),
     0
   );
 
-  const totalInventoryUnits = products.reduce((acc, p) => acc + p.quantity, 0);
+  const totalInventoryUnits = products.reduce((acc, p) => acc + (p.quantity || 0), 0);
 
   useEffect(() => {
     setCurrentDateStr(formatDate(new Date()));
@@ -79,10 +80,19 @@ export default function DashboardView({
       } catch (err) {
         console.warn("FastAPI top selling items unreachable:", err);
       }
+
+      try {
+        const trend = await reportsApi.getWeeklyTrend();
+        if (trend && trend.length > 0) {
+          setWeeklyTrend(trend);
+        }
+      } catch (err) {
+        console.warn("FastAPI weekly trend unreachable:", err);
+      }
     }
 
     loadAnalytics();
-  }, []);
+  }, [products]);
 
   return (
     <div className="space-y-6">
@@ -168,7 +178,7 @@ export default function DashboardView({
           <div className="h-[270px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
-                data={salesTrend}
+                data={weeklyTrend.length > 0 ? weeklyTrend : salesTrend}
                 margin={{ top: 10, right: 10, left: -15, bottom: 0 }}
               >
                 <defs>

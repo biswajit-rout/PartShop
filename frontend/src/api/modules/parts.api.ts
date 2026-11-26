@@ -119,4 +119,33 @@ export const partsApi = {
       method: "DELETE",
     });
   },
+
+  /**
+   * Fast Goods Inward / Restock an existing spare part.
+   */
+  async restock(
+    id: number | string,
+    payload: {
+      quantity_to_add: number;
+      purchase_price?: number;
+      rack_number?: string;
+    }
+  ): Promise<SparePart> {
+    const data = await apiClient<BackendSparePart>(`/parts/${id}/restock`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    return mapBackendPartToFrontend(data);
+  },
+
+  /**
+   * Bind or update a barcode for a spare part.
+   */
+  async assignBarcode(id: number | string, barcode: string): Promise<SparePart> {
+    const data = await apiClient<BackendSparePart>(`/parts/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ barcode }),
+    });
+    return mapBackendPartToFrontend(data);
+  },
 };

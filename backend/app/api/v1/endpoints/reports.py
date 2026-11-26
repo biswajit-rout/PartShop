@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.user import UserRole
-from app.schemas.reports import DailySalesSummary, TopSellingPart, LowStockItem
+from app.schemas.reports import DailySalesSummary, TopSellingPart, LowStockItem, WeeklyTrendPoint
 from app.services.report_service import ReportService
 from app.api.deps import require_role
 
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/reports", tags=["Business Reports & Analytics"])
     "/daily-sales",
     response_model=DailySalesSummary,
     dependencies=[Depends(require_role(
-        [UserRole.ADMIN, UserRole.STORE_MANAGER]))],
+        [UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
 )
 async def get_daily_sales(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -64,3 +64,18 @@ async def get_low_stock_report(
     """List all parts where current inventory is at or below the minimum re-order threshold."""
     service = ReportService(db)
     return await service.get_low_stock_report()
+
+
+# 4. Weekly Sales vs Purchase Cash Flow Trend
+@router.get(
+    "/weekly-trend",
+    response_model=list[WeeklyTrendPoint],
+    dependencies=[Depends(require_role(
+        [UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
+)
+async def get_weekly_trend(
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get 7-day rolling sales vs purchase comparison for cash flow analytics."""
+    service = ReportService(db)
+    return await service.get_weekly_trend()

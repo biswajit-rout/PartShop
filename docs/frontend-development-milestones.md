@@ -26,12 +26,13 @@ flowchart LR
     F6 --> F7["Milestone F7<br/>Token Search Engine<br/>(Done)"]
     F7 --> F8["Milestone F8<br/>Suppliers & Purchase Disc<br/>(Done)"]
     F8 --> F9["Milestone F9<br/>Dedicated Search Tab<br/>(Done)"]
+    F9 --> F10["Milestone F10<br/>Mobile Scanner & Restock<br/>(Done)"]
 
     classDef done fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ecfdf5;
     classDef current fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#cbd5e1;
     classDef pending fill:#0f172a,stroke:#64748b,stroke-width:1px,color:#94a3b8;
 
-    class F0,F1,F2,F3,F4,F5,F6,F7,F8,F9 done;
+    class F0,F1,F2,F3,F4,F5,F6,F7,F8,F9,F10 done;
 ```
 
 ---
@@ -50,6 +51,7 @@ flowchart LR
 | **Milestone F7** | **Tokenized Automotive Search Engine** | Multi-token search with automotive stem/abbreviation expansions (`filter`/`filt`, `brake`/`brk`, `cushion`/`shock`) across all catalog attributes. | `Completed` | 2026-11-26 |
 | **Milestone F8** | **Wholesale Supplier Management & Purchase Discounts** | Live supplier directory, "+ Add / Edit Supplier" modals, "View Supplied Items" parts drawer, Excel workbook import under supplier with purchase discount mapping, and inventory supplier filtering. | `Completed` | 2026-11-26 |
 | **Milestone F9** | **Dedicated Quick Spares Search Tab** | Dedicated `SearchView.tsx` with hero search input, quick preset chips, and detailed part cards (Item Name, Price, Supported Model, Supplier Details, Quantity, Selling Price, Rack No). | `Completed` | 2026-11-26 |
+| **Milestone F10** | **Mobile Barcode Scanner & Real-Time Restock Flow** | Real-time WebSocket mobile camera scanner (`/scan`), dynamic QR code pairing, auto-filling missing barcodes in Add/Edit modals, and Fast Goods Inward restock confirmation dialog. | `Completed` | 2026-11-26 |
 
 ---
 
@@ -393,3 +395,34 @@ Connected root controller authentication gate:
 #### 3. Verification & Container Health
 - **Next.js Compilation**: `Generating static pages (4/4)` built cleanly in Docker with 0 errors.
 - **HTTP Status Check**: Verified `http://localhost:3000` responds with status `200`.
+
+---
+
+### Milestone F10: Mobile Barcode Scanner & Real-Time Restock Flow
+- **Status**: `Completed` (2026-11-26)
+- **Objective**: Turn any smartphone into a wireless handheld barcode terminal via WebSocket communication, enabling instant rack search, automatic barcode assignment in Add/Edit modals, and fast Goods Inward restock confirmation.
+
+#### 1. File Created: `frontend/src/app/scan/page.tsx`
+- **Mobile Camera Dual-Mode Architecture**:
+  - **Live WebRTC Stream Mode**: Continuous viewfinder with targeting reticle and animated laser scan indicator powered by `@zxing/browser` (`BrowserMultiFormatReader`) and native `BarcodeDetector`.
+  - **HTML5 Camera Photo Snap Mode**: One-tap native camera snapshot trigger (`<input type="file" capture="environment">`) that functions on 100% of iOS and Android smartphones over unencrypted local HTTP without requiring SSL certificates or browser flag configurations.
+- **Audio & Haptic Feedback**: Synthesizes 880Hz audio chime via Web Audio API and triggers 100ms vibration on detection.
+- **Anti-Spam Debounce**: 1.8-second cooldown prevents repeated scans of the same item.
+- **WebSocket Gateway**: Connects to `ws://<BACKEND_HOST>:8001/api/v1/scanner/ws/{session_id}` with 15-second keep-alive ping/pong.
+- **In-App Guidance**: Built-in accordion detailing Chrome flags (`chrome://flags/#unsafely-treat-insecure-origin-as-secure`) for users desiring continuous live video streaming on Android over local Wi-Fi.
+
+#### 2. Files Updated
+- `frontend/src/api/modules/scanner.api.ts`: Created client service for network info discovery, session ID generation, and WebSocket URL building.
+- `frontend/src/api/modules/parts.api.ts`: Added `partsApi.restock(id, payload)` and `partsApi.assignBarcode(id, barcode)`.
+- `frontend/src/components/views/SearchView.tsx`:
+  - Added **"Scan with Phone"** button and Pairing Modal with dynamic QR code and LAN IP configuration.
+  - Added **Continuous Scan Batch Tray** showing scanned parts with one-click "Add Batch to Bill (POS)".
+  - Added **Fast Goods Inward Dialog** allowing store managers to confirm incoming stock, update cost, and log audit movements.
+- `frontend/src/components/views/InventoryView.tsx`:
+  - Added **"Scan with Phone"** trigger beside the Barcode input in both Add Part and Edit Part modals.
+  - Added **"+ Assign Barcode"** quick action on parts missing barcodes in the inventory table.
+  - Added **"Restock"** action button in table rows launching the quick Goods Inward modal.
+
+#### 3. Verification & Container Health
+- **Next.js Static Generation**: `Generating static pages (5/5) in 4.0s` including `/scan` with 0 errors.
+- **End-to-End Verification**: Tested `/scan` route (HTTP 200), `/api/v1/scanner/network-info` (LAN IP auto-detection), and `POST /api/v1/parts/1/restock` (incremented quantity with `PURCHASE_IN` ledger entry).

@@ -74,6 +74,7 @@ flowchart TD
             BV["BillingView"]
             SV["SuppliersView"]
             MV["MechanicsView"]
+            EV["ExpensesView"]
             RV["ReportsView"]
             STV["SettingsView"]
         end
@@ -207,6 +208,7 @@ The current frontend operates as an **App Router SPA (Single Page Application)**
     | "Billing"
     | "Suppliers"
     | "Mechanics"
+    | "Expenses"
     | "Reports"
     | "Settings";
   ```
@@ -218,14 +220,16 @@ For high-speed counter POS terminals, full page transitions that cause network r
 
 | URL Route | Rendered Component | Component Type | Current Implementation State |
 | :--- | :--- | :--- | :--- |
-| `/` (Default: Dashboard) | `DashboardView` | Client Component | **Implemented** (KPIs, Charts, Stock Alerts) |
+| `/` (Default: Dashboard) | `DashboardView` | Client Component | **Implemented** (KPIs, Weekly Sales vs Purchase AreaChart, Stock Alerts) |
 | `/` (Tab: Search) | `SearchView` | Client Component | **Implemented** (Dedicated Search Bar, Automotive Stems, Spare Part Cards) |
 | `/` (Tab: Inventory) | `InventoryView` | Client Component | **Implemented** (Catalog, Filters, Excel Spec) |
-| `/` (Tab: Billing) | `BillingView` | Client Component | **Implemented** (POS Barcode Billing, GST, Commission) |
+| `/` (Tab: Billing) | `BillingView` | Client Component | **Implemented** (Clean POS Barcode Billing, GST, Commission, Settlement) |
 | `/` (Tab: Suppliers) | `SuppliersView` | Client Component | **Implemented** (Wholesaler Cards, GSTIN) |
 | `/` (Tab: Mechanics) | `MechanicsView` | Client Component | **Implemented** (Commission Accounts Ledger) |
+| `/` (Tab: Expenses) | `ExpensesView` | Client Component | **Implemented** (Daily Expenses Ledger, Net Profit KPI, Category Breakdown, "+ Record Expense" Modal) |
 | `/` (Tab: Reports) | `ReportsView` | Client Component | **Implemented** (Report Cards, PDF/XLSX triggers) |
 | `/` (Tab: Settings) | `SettingsView` | Client Component | **Implemented** (Shop Profile, Thermal Config) |
+| `/scan` | `MobileScanPage` (`src/app/scan/page.tsx`) | Client Component | **Implemented** (Mobile Camera Barcode Scanner, WebSockets Hub, Audio Beep & Haptics) |
 | `/_not-found` | Built-in Next.js 404 | Server Component | **Implemented** (Static fallback) |
 
 ---
@@ -238,14 +242,18 @@ The following diagram maps the parent-child component hierarchy starting from th
 flowchart TD
     RootLayout["RootLayout (layout.tsx)"]
     Home["Home (page.tsx) ['use client']"]
+    ScannerProvider["ScannerProvider (context/ScannerContext.tsx)"]
     
     LiquidBG["LiquidBackground"]
-    GlassSidebar["GlassSidebar"]
-    GlassHeader["GlassHeader"]
+    GlassSidebar["GlassSidebar (User Profile & Logout)"]
+    GlassHeader["GlassHeader (Instant Search Autocomplete & Phone Indicator Pill & Logout)"]
+    MobileScannerModal["MobileScannerModal (Pairing QR + Device Roster)"]
     
     DashboardView["DashboardView"]
-    InventoryView["InventoryView"]
-    BillingView["BillingView"]
+    SearchView["SearchView (Hero Search + Fast Inward Restock)"]
+    ExpensesView["ExpensesView (Operating Expenses & Daily Profit Engine)"]
+    InventoryView["InventoryView (Catalog + Barcode Auto-Fill)"]
+    BillingView["BillingView (POS + Mobile Hands-Free Billing)"]
     SuppliersView["SuppliersView"]
     MechanicsView["MechanicsView"]
     ReportsView["ReportsView"]
@@ -260,13 +268,16 @@ flowchart TD
     Recharts["Recharts (AreaChart, PieChart)"]
 
     RootLayout --> Home
-    Home --> LiquidBG
-    Home --> GlassSidebar
-    Home --> GlassHeader
+    Home --> ScannerProvider
+    ScannerProvider --> LiquidBG
+    ScannerProvider --> MobileScannerModal
+    ScannerProvider --> GlassSidebar
+    ScannerProvider --> GlassHeader
     
-    Home --> DashboardView
-    Home --> InventoryView
-    Home --> BillingView
+    ScannerProvider --> DashboardView
+    ScannerProvider --> SearchView
+    ScannerProvider --> InventoryView
+    ScannerProvider --> BillingView
     Home --> SuppliersView
     Home --> MechanicsView
     Home --> ReportsView

@@ -6,6 +6,7 @@ from app.models.brand import Brand
 from app.models.mechanic import Mechanic, MechanicBrandCommission
 from app.models.sale import Sale, SaleItem, PaymentMethod
 from app.models.stock_movement import StockMovement, StockMovementType
+from app.models.expense import Expense, ExpenseCategory
 
 __all__ = [
     "TimestampMixin",
@@ -21,4 +22,6 @@ __all__ = [
     "PaymentMethod",
     "StockMovement",
     "StockMovementType",
+    "Expense",
+    "ExpenseCategory",
 ]

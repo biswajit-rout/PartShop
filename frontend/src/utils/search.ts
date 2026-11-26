@@ -85,3 +85,53 @@ export function matchSearchTokens(targetText: string, query: string): boolean {
     return false;
   });
 }
+
+/**
+ * Robust matching for barcodes and 2D QR codes on spare parts packaging.
+ * Handles:
+ * 1. Direct exact matches (barcode, partNumber, id).
+ * 2. Normalized alphanumeric matches (ignoring dashes, slashes, spaces like "01721-K0L-D00" vs "01721K0LD00").
+ * 3. Delimited multi-attribute QR code strings (e.g. pipe, semicolon, newline, colon, comma).
+ * 4. URLs containing part numbers or barcodes in query parameters or path segments.
+ */
+export function matchScannedCode(
+  part: { id: string | number; barcode?: string | null; partNumber: string; name?: string },
+  scannedCode: string
+): boolean {
+  if (!scannedCode || !scannedCode.trim()) return false;
+  const raw = scannedCode.trim();
+  const rawLower = raw.toLowerCase();
+
+  const partId = String(part.id).toLowerCase();
+  const barcode = (part.barcode || "").toLowerCase();
+  const partNumber = (part.partNumber || "").toLowerCase();
+
+  // 1. Direct exact match
+  if (barcode && barcode === rawLower) return true;
+  if (partNumber && partNumber === rawLower) return true;
+  if (partId === rawLower) return true;
+
+  // Helper: strip punctuation and whitespace to alphanumeric only
+  const clean = (s: string) => s.replace(/[^a-z0-9]/gi, "").toLowerCase();
+  const cleanRaw = clean(raw);
+  const cleanBarcode = clean(barcode);
+  const cleanPartNum = clean(partNumber);
+
+  // 2. Normalized alphanumeric match (e.g. "01721-K0L-D00" matches "01721K0LD00")
+  if (cleanBarcode && cleanBarcode === cleanRaw) return true;
+  if (cleanPartNum && cleanPartNum === cleanRaw) return true;
+
+  // 3. Substring check: if part number or barcode is contained in a complex QR code payload
+  if (cleanBarcode && cleanBarcode.length >= 6 && cleanRaw.includes(cleanBarcode)) return true;
+  if (cleanPartNum && cleanPartNum.length >= 5 && cleanRaw.includes(cleanPartNum)) return true;
+
+  // 4. Token/delimiters check (for structured QR codes like "P/N:01721K0LD00;QTY:1" or "890123|01721")
+  const tokens = raw.split(/[\s,;|:\n\r\t/\\?&=]+/).map((t) => clean(t)).filter((t) => t.length >= 4);
+  for (const t of tokens) {
+    if (cleanBarcode && t === cleanBarcode) return true;
+    if (cleanPartNum && t === cleanPartNum) return true;
+  }
+
+  return false;
+}
+

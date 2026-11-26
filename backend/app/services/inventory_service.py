@@ -5,7 +5,7 @@ from app.models.spare_part import SparePart
 from app.models.supplier import Supplier
 from app.models.stock_movement import StockMovement, StockMovementType
 from app.repositories.spare_part_repo import SparePartRepository
-from app.schemas.spare_part import SparePartCreate, SparePartUpdate
+from app.schemas.spare_part import SparePartCreate, SparePartUpdate, SparePartRestock
 
 
 class InventoryService:
@@ -155,3 +155,40 @@ class InventoryService:
         """Delete part from inventory."""
         part = await self.get_part_by_id(part_id)
         await self.repo.delete(part)
+
+    async def restock_part(self, part_id: int, restock_data: SparePartRestock) -> SparePart:
+        """
+        Fast Goods Inward / Restock action:
+        Increments stock level, updates purchase cost / rack location if provided,
+        and logs a PURCHASE_IN immutable stock movement audit entry.
+        """
+        part = await self.get_part_by_id(part_id)
+
+        if restock_data.quantity_to_add <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Quantity to add must be greater than zero.",
+            )
+
+        old_quantity = part.quantity
+        new_quantity = old_quantity + restock_data.quantity_to_add
+        part.quantity = new_quantity
+
+        if restock_data.purchase_price is not None:
+            part.purchase_price = restock_data.purchase_price
+        if restock_data.rack_number is not None:
+            part.rack_number = restock_data.rack_number
+
+        # Create immutable audit movement entry
+        movement = StockMovement(
+            spare_part_id=part.id,
+            movement_type=StockMovementType.PURCHASE_IN,
+            quantity_change=restock_data.quantity_to_add,
+            balance_after=new_quantity,
+            reference_type="RESTOCK_SCAN",
+        )
+        self.db.add(movement)
+
+        await self.db.commit()
+        await self.db.refresh(part)
+        return part
