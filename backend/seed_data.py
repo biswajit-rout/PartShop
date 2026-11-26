@@ -6,6 +6,8 @@ from app.core.security import hash_password
 from app.models.user import User, UserRole
 from app.models.brand import Brand
 from app.models.mechanic import Mechanic, MechanicBrandCommission
+from app.models.supplier import Supplier
+from app.models.spare_part import SparePart
 
 
 async def seed():
@@ -113,6 +115,95 @@ async def seed():
                         )
                         db.add(comm)
                 print(f"Seeded mechanic: {m_data['name']} ({m_data['garage_name']})")
+
+        # 4. Seed Wholesaler Suppliers
+        suppliers_data = [
+            {
+                "name": "Kalyani Honda Spares Distributorship",
+                "contact_person": "Rajesh Kalyani",
+                "phone": "+91 94370 12345",
+                "email": "orders@kalyanihonda.com",
+                "address": "Plot 45, Auto Nagar, Cuttack Road",
+                "gst_number": "21AAECK1234F1Z5",
+                "default_discount_percentage": Decimal("14.50"),
+                "brands": ["Honda"],
+            },
+            {
+                "name": "Om Sai Auto Spares Wholesaler",
+                "contact_person": "Mahesh Agarwal",
+                "phone": "+91 94371 67890",
+                "email": "sales@omsaiauto.in",
+                "address": "G-12, Transport Nagar, Ring Road",
+                "gst_number": "21BBCOA5678G2Z1",
+                "default_discount_percentage": Decimal("18.00"),
+                "brands": ["Bajaj", "Endurance"],
+            },
+            {
+                "name": "National Hero Genuine Spares",
+                "contact_person": "Sunil Patnaik",
+                "phone": "+91 94372 99887",
+                "email": "patnaik.hero@gmail.com",
+                "address": "Station Square, Near Railway Overbridge",
+                "gst_number": "21CCPHP9988H1ZA",
+                "default_discount_percentage": Decimal("15.00"),
+                "brands": ["Hero"],
+            },
+        ]
+
+        supplier_map: dict[str, Supplier] = {}
+        for s_data in suppliers_data:
+            res = await db.execute(select(Supplier).where(Supplier.name == s_data["name"]))
+            supp = res.scalar_one_or_none()
+            if not supp:
+                supp = Supplier(
+                    name=s_data["name"],
+                    contact_person=s_data["contact_person"],
+                    phone=s_data["phone"],
+                    email=s_data["email"],
+                    address=s_data["address"],
+                    gst_number=s_data["gst_number"],
+                    default_discount_percentage=s_data["default_discount_percentage"],
+                    is_active=True,
+                )
+                db.add(supp)
+                await db.flush()
+                print(f"Seeded supplier: {s_data['name']}")
+            supplier_map[s_data["name"]] = supp
+
+        # 5. Map Existing Spare Parts to Seeded Suppliers if not yet mapped
+        all_parts_res = await db.execute(select(SparePart).where(SparePart.supplier_id.is_(None)))
+        unmapped_parts = list(all_parts_res.scalars().all())
+        mapped_count = 0
+
+        honda_supp = supplier_map.get("Kalyani Honda Spares Distributorship")
+        bajaj_supp = supplier_map.get("Om Sai Auto Spares Wholesaler")
+        hero_supp = supplier_map.get("National Hero Genuine Spares")
+
+        for p in unmapped_parts:
+            b_name = (p.brand_name or "").lower()
+            compat = (p.compatible_bikes or "").lower()
+
+            if "honda" in b_name or "honda" in compat or "activa" in compat or "dio" in compat:
+                if honda_supp:
+                    p.supplier_id = honda_supp.id
+                    p.supplier_name = honda_supp.name
+                    p.supplier_discount = honda_supp.default_discount_percentage
+                    mapped_count += 1
+            elif "bajaj" in b_name or "bajaj" in compat or "pulsar" in compat:
+                if bajaj_supp:
+                    p.supplier_id = bajaj_supp.id
+                    p.supplier_name = bajaj_supp.name
+                    p.supplier_discount = bajaj_supp.default_discount_percentage
+                    mapped_count += 1
+            elif "hero" in b_name or "hero" in compat or "splendor" in compat:
+                if hero_supp:
+                    p.supplier_id = hero_supp.id
+                    p.supplier_name = hero_supp.name
+                    p.supplier_discount = hero_supp.default_discount_percentage
+                    mapped_count += 1
+
+        if mapped_count > 0:
+            print(f"Mapped {mapped_count} spare parts to suppliers with supplier discount percentages.")
 
         await db.commit()
         print("Seed completed successfully!")

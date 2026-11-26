@@ -3,7 +3,7 @@
 > **Document Purpose**: Official architectural specification, Clean Layered design patterns, and step-by-step milestone learning roadmap for the FastAPI backend.  
 > **Source of Truth**: Codebase (`d:/Programming/PartShop`)  
 > **Governance**: Maintained according to rules established in `AGENTS.md`.  
-> **Last Updated**: 2026-11-22  
+> **Last Updated**: 2026-11-26  
 
 ---
 
@@ -85,6 +85,7 @@ This tracker tracks our step-by-step progress. Each milestone builds directly on
 | **Milestone 5** | **Atomic POS Billing Engine** | Implement atomic transactions with row-level locking (`SELECT ... FOR UPDATE`), stock decrementing, GST calculation, and mechanic commissions. | `Completed` |
 | **Milestone 6** | **Excel Bulk Import & Reports** | Parse and validate `.xlsx` catalogs with bulk database inserts. Daily sales summaries and profit margin reports. | `Completed` |
 | **Milestone 7** | **Docker Containerization & Frontend Link** | Create `backend/Dockerfile`, connect the backend container to `docker-compose.yml`, and test end-to-end communication with the Next.js UI. | `Completed` |
+| **Milestone 8** | **Wholesale Supplier Management & Purchase Discounts** | Multi-supplier purchase discount mapping, Excel upload under supplier, and supplier item query endpoints. | `Completed` |
 
 ---
 
@@ -169,3 +170,16 @@ This tracker tracks our step-by-step progress. Each milestone builds directly on
 - **What you'll learn**:
   - Optimizing Python Docker images for fast build times and minimal footprint.
   - Connecting Next.js client-side fetchers to FastAPI endpoints.
+
+### Milestone 8: Wholesale Supplier Management & Purchase Discounts
+- **Goal**: Allow shop owners to manage multi-supplier relationships with distinct purchase discount rates, upload catalogs under specific suppliers, and query supplier item ledgers.
+- **Files**:
+  - `backend/app/models/supplier.py`: `Supplier` entity with GSTIN, contact details, and `default_discount_percentage`.
+  - `backend/app/models/spare_part.py`: Added `supplier_id`, `supplier_name`, and `supplier_discount` attributes.
+  - `backend/alembic/versions/a5c007d4e19b_create_suppliers_table_and_add_supplier_.py`: Alembic migration for PostgreSQL.
+  - `backend/app/services/supplier_service.py`: Supplier CRUD operations and aggregate parts counting.
+  - `backend/app/services/import_service.py`: Enhanced to map uploaded parts to selected suppliers with purchase discount calculation.
+  - `backend/app/api/v1/endpoints/suppliers.py`: Endpoints for supplier management and `GET /{id}/parts`.
+- **What you'll learn**:
+  - Managing foreign key relationships with `SET NULL` on delete to preserve historical parts data.
+  - Combining SQL aggregations (`func.count`) with group-by queries to provide instantaneous supplier catalog counts.

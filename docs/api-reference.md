@@ -3,7 +3,7 @@
 > **Document Purpose**: Complete HTTP API specifications, request/response contracts, validation rules, and authentication schemas.  
 > **Source of Truth**: Active Codebase (`d:/Programming/PartShop`)  
 > **Governance**: Maintained according to rules established in `AGENTS.md`.  
-> **Last Updated**: 2026-11-23  
+> **Last Updated**: 2026-11-26  
 
 ---
 
@@ -132,6 +132,9 @@ Adds a new item to the shop inventory with pricing and barcode.
     "selling_price": 450.00,
     "customer_discount": 5.00,
     "mechanic_discount": 12.00,
+    "supplier_id": 2,
+    "supplier_name": "Om Sai Auto Spares Wholesaler",
+    "supplier_discount": 18.00,
     "barcode": "8901234567890"
   }
   ```
@@ -303,28 +306,22 @@ Uploads an Excel (`.xlsx`) catalog file, validates rows, detects and skips dupli
 - **Content-Type**: `multipart/form-data`
 - **Form Parameters**:
   - `file`: Excel file (`.xlsx`) containing spare parts data.
+  - `supplier_id` (optional, integer): ID of wholesale supplier to map imported parts to.
+  - `brand_name` (optional, string): Fallback brand name to apply if spreadsheet rows omit brand.
+  - `default_supplier_discount` (optional, numeric): Fallback purchase discount % (e.g. `14.50`) applied to compute cost from MRP.
 - **Header Columns Expected in Excel**:
-  - Required: `item_name`, `brand_name` (or `brand`), `part_number`, `purchase_price`, `selling_price`
-  - Optional: `model_number`, `compatible_bikes`, `quantity`, `min_stock_alert`, `rack_number`, `customer_discount`, `mechanic_discount`, `barcode`
+  - Required: `item_name`, `brand_name` (or `brand`), `part_number`, `purchase_price`, `selling_price` (or `MRP` with supplier discount)
+  - Optional: `model_number`, `compatible_bikes`, `quantity`, `min_stock_alert`, `rack_number`, `customer_discount`, `mechanic_discount`, `barcode`, `supplier_discount`
 - **Response (`200 OK`)**:
   ```json
   {
-    "filename": "bajaj_pulsar_catalog_nov2026.xlsx",
-    "total_rows_processed": 150,
-    "imported_count": 148,
-    "skipped_count": 2,
-    "errors": [
-      {
-        "row_number": 45,
-        "part_number": "BP-201-FR",
-        "reason": "Part number 'BP-201-FR' already exists in database or spreadsheet."
-      },
-      {
-        "row_number": 82,
-        "part_number": null,
-        "reason": "item_name, brand_name, and part_number cannot be empty."
-      }
-    ]
+    "filename": "honda_activa_spares_nov2026.xlsx",
+    "total_rows_processed": 53,
+    "imported_count": 53,
+    "skipped_count": 0,
+    "supplier_id": 1,
+    "supplier_name": "Kalyani Honda Spares Distributorship",
+    "errors": []
   }
   ```
 - **Error Codes**:
@@ -588,5 +585,94 @@ Calculates aggregate KPI totals: parts count, sales volume, and total commission
     "total_commission_earned": "36.00"
   }
   ```
+
+---
+
+## 9. Wholesale Suppliers Directory (`/api/v1/suppliers`)
+
+### 9.1 List All Suppliers
+Returns all registered wholesale suppliers and distributor partners along with their aggregate mapped inventory parts count.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/suppliers`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Query Parameters**:
+  - `active_only` (optional, boolean, default: `false`): Filter active suppliers only.
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "id": 1,
+      "name": "Kalyani Honda Spares Distributorship",
+      "contact_person": "Prakash Rout",
+      "phone": "+91 94370 12345",
+      "email": "orders@kalyanihonda.com",
+      "address": "Plot 12, Industrial Estate, Cuttack, Odisha",
+      "gst_number": "21AABCK1234F1Z9",
+      "default_discount_percentage": "14.50",
+      "is_active": true,
+      "total_parts_count": 53,
+      "created_at": "2026-11-26T00:00:00Z",
+      "updated_at": "2026-11-26T00:00:00Z"
+    }
+  ]
+  ```
+
+### 9.2 Create Supplier
+Registers a new distributor or wholesale partner.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/suppliers`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SupplierCreate`)**:
+  ```json
+  {
+    "name": "Om Sai Auto Spares Wholesaler",
+    "contact_person": "Sanjay Mohanty",
+    "phone": "+91 94371 67890",
+    "email": "omsai.spares@gmail.com",
+    "address": "Badambadi Market, Cuttack, Odisha",
+    "gst_number": "21AABCO5678H1Z4",
+    "default_discount_percentage": 18.00,
+    "is_active": true
+  }
+  ```
+- **Response (`201 Created`)**: Full `SupplierResponse` object with `total_parts_count: 0`.
+
+### 9.3 Get Supplier by ID
+Retrieves details for a single supplier.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/suppliers/{id}`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Response (`200 OK`)**: Full `SupplierResponse` object.
+
+### 9.4 Update Supplier
+Updates supplier contact details, address, GSTIN, or default purchase discount percentage.
+
+- **Method**: `PUT`
+- **Route**: `/api/v1/suppliers/{id}`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SupplierUpdate`)**: Partial update fields.
+- **Response (`200 OK`)**: Updated `SupplierResponse` object.
+
+### 9.5 Delete Supplier
+Soft-deactivates or deletes a supplier partner.
+
+- **Method**: `DELETE`
+- **Route**: `/api/v1/suppliers/{id}`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`)
+- **Response (`204 No Content`)**
+
+### 9.6 Get Items Supplied by Supplier
+Returns a paginated list of all spare parts mapped to a specific wholesale supplier, including part number, compatible bikes, purchase discount %, purchase cost, MRP, and stock on hand.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/suppliers/{id}/parts`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Query Parameters**:
+  - `skip` (integer, default: `0`)
+  - `limit` (integer, default: `100`, max: `500`)
+- **Response (`200 OK`)**: `PaginatedSpareParts` schema with `total`, `items`, `page`, and `pages`.
 
 

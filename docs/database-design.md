@@ -3,7 +3,7 @@
 > **Document Purpose**: Database schema specification, Entity-Relationship diagrams, indexing strategies, constraints, and migration governance.  
 > **Source of Truth**: Codebase (`d:/Programming/PartShop`)  
 > **Governance**: Maintained according to rules established in `AGENTS.md`.  
-> **Last Updated**: 2026-11-23  
+> **Last Updated**: 2026-11-26  
 
 ---
 
@@ -47,6 +47,9 @@ erDiagram
         numeric selling_price "10, 2"
         numeric customer_discount "5, 2 default 0.0"
         numeric mechanic_discount "5, 2 default 0.0"
+        int supplier_id FK "SET NULL"
+        varchar supplier_name "Wholesaler Name"
+        numeric supplier_discount "5, 2 default 0.0"
         varchar barcode UK "Indexed"
         varchar qr_code
         timestamptz created_at
@@ -55,11 +58,16 @@ erDiagram
 
     suppliers {
         int id PK
-        varchar name
+        varchar name UK "Indexed"
         varchar contact_person
         varchar phone
+        varchar email
+        text address
         varchar gst_number
+        numeric default_discount_percentage "5, 2 default 0.0"
+        boolean is_active
         timestamptz created_at
+        timestamptz updated_at
     }
 
     brands {
@@ -175,6 +183,9 @@ Stores the inventory catalog, pricing tiers, barcodes, and bin/rack locations.
 | `selling_price` | `NUMERIC(10, 2)` | `NOT NULL` | Counter retail price |
 | `customer_discount` | `NUMERIC(5, 2)` | `NOT NULL`, Default: `0.00` | Retail customer discount percentage |
 | `mechanic_discount` | `NUMERIC(5, 2)` | `NOT NULL`, Default: `0.00` | Registered garage mechanic discount |
+| `supplier_id` | `INTEGER` | `NULLABLE`, `FK -> suppliers.id (SET NULL)` | Mapped wholesale supplier distributor |
+| `supplier_name` | `VARCHAR(100)` | `NULLABLE` | Cached supplier name for fast listing |
+| `supplier_discount` | `NUMERIC(5, 2)` | `NOT NULL`, Default: `0.00` | Supplier purchase discount rate provided to shop |
 | `barcode` | `VARCHAR(100)` | `UNIQUE`, `NULLABLE`, `INDEXED` | Scannable POS barcode |
 | `qr_code` | `VARCHAR(255)` | `NULLABLE` | QR Code locator identifier |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Record creation timestamp (UTC) |
@@ -268,6 +279,23 @@ Customized brand-specific commission override rates per mechanic partner.
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
 | *Constraint* | `UNIQUE(mechanic_id, brand_id)` | `NOT NULL` | One rate per mechanic-brand pair |
+
+### 3.9 `suppliers` Table
+Wholesale suppliers and authorized spare parts distributors.
+
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | `PRIMARY KEY`, `AUTO_INCREMENT` | Unique supplier identifier |
+| `name` | `VARCHAR(100)` | `UNIQUE`, `NOT NULL`, `INDEXED` | Distributor or wholesale agency trade name |
+| `contact_person`| `VARCHAR(100)` | `NULLABLE` | Primary account manager or representative |
+| `phone` | `VARCHAR(20)` | `NOT NULL` | Business telephone or mobile contact |
+| `email` | `VARCHAR(100)` | `NULLABLE` | Business communication & billing email |
+| `address` | `TEXT` | `NULLABLE` | Warehouse or showroom physical address |
+| `gst_number` | `VARCHAR(20)` | `NULLABLE` | GSTIN tax registration compliance identifier |
+| `default_discount_percentage` | `NUMERIC(5, 2)` | `NOT NULL`, Default: `0.00` | Default wholesale discount rate offered to shop |
+| `is_active` | `BOOLEAN` | `NOT NULL`, Default: `TRUE` | Operational active status flag |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Record creation timestamp (UTC) |
+| `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
 
 ---
 

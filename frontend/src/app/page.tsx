@@ -13,6 +13,7 @@ import GlassHeader from "@/components/layout/GlassHeader";
 // Modular Domain Views
 import LoginView from "@/components/views/LoginView";
 import DashboardView from "@/components/views/DashboardView";
+import SearchView from "@/components/views/SearchView";
 import InventoryView from "@/components/views/InventoryView";
 import BillingView from "@/components/views/BillingView";
 import SuppliersView from "@/components/views/SuppliersView";
@@ -143,6 +144,13 @@ export default function Home() {
             />
           )}
 
+          {currentSection === "Search" && (
+            <SearchView
+              products={products}
+              onNavigate={setCurrentSection}
+            />
+          )}
+
           {currentSection === "Inventory" && (
             <InventoryView
               products={products}
@@ -159,7 +167,9 @@ export default function Home() {
             />
           )}
 
-          {currentSection === "Suppliers" && <SuppliersView />}
+          {currentSection === "Suppliers" && (
+            <SuppliersView onRefreshCatalog={refreshCatalog} />
+          )}
 
           {currentSection === "Mechanics" && <MechanicsView />}
 

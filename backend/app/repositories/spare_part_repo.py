@@ -76,13 +76,14 @@ class SparePartRepository(BaseRepository[SparePart]):
         self,
         query: str | None = None,
         brand: str | None = None,
+        supplier_id: int | None = None,
         low_stock_only: bool = False,
         skip: int = 0,
         limit: int = 50,
     ) -> tuple[list[SparePart], int]:
         """
         Tokenized multi-attribute search across item name, part number, compatible bikes,
-        model number, brand name, and barcode with synonym expansion and low-stock filter.
+        model number, brand name, supplier name, and barcode with synonym expansion and low-stock filter.
         
         Requires all tokens in the query to match across any field (AND-joined tokens).
         """
@@ -105,6 +106,7 @@ class SparePartRepository(BaseRepository[SparePart]):
                         SparePart.compatible_bikes.ilike(like_pat),
                         SparePart.model_number.ilike(like_pat),
                         SparePart.brand_name.ilike(like_pat),
+                        SparePart.supplier_name.ilike(like_pat),
                         SparePart.barcode.ilike(like_pat),
                     ])
                 stmt = stmt.where(or_(*clauses))
@@ -112,6 +114,10 @@ class SparePartRepository(BaseRepository[SparePart]):
         # Filter by brand
         if brand:
             stmt = stmt.where(SparePart.brand_name.ilike(brand))
+
+        # Filter by supplier
+        if supplier_id is not None:
+            stmt = stmt.where(SparePart.supplier_id == supplier_id)
 
         # Filter low stock
         if low_stock_only:

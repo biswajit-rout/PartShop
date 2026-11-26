@@ -10,6 +10,14 @@ and follows the governance instructions established in `AGENTS.md`.
 ## 2026-11-26
 
 ### Added
+- `frontend/src/components/views/SearchView.tsx`: Implemented dedicated Quick Spares Search view with hero search bar, popular suggestion chips ("Bajaj Pulsar Air filter", "Activa Brake Pad", etc.), and comprehensive part cards displaying Item Name, Price, Supported Models, Supplier Details with purchase discount %, Stock Quantity, and Rack location.
+- `backend/app/models/supplier.py`: Created `Supplier` model with business name, contact person, phone, email, address, GSTIN, default purchase discount percentage, and active flag.
+- `backend/alembic/versions/a5c007d4e19b_create_suppliers_table_and_add_supplier_.py`: Generated and applied database migration creating `suppliers` table and adding `supplier_id`, `supplier_name`, and `supplier_discount` columns to `spare_parts`.
+- `backend/app/schemas/supplier.py`: Pydantic v2 schemas (`SupplierCreate`, `SupplierUpdate`, `SupplierResponse`) with `total_parts_count` aggregation.
+- `backend/app/services/supplier_service.py`: Business logic service for supplier lifecycle and querying all spare parts supplied by a specific distributor.
+- `backend/app/api/v1/endpoints/suppliers.py`: REST CRUD endpoints and `GET /api/v1/suppliers/{id}/parts`.
+- `frontend/src/api/modules/suppliers.api.ts`: Modular API client connecting UI to `/api/v1/suppliers` endpoints.
+- `frontend/src/components/views/SuppliersView.tsx`: Completely modernized live view featuring supplier summary KPI cards, "+ Add Supplier" modal, "Edit Supplier" modal, "View Supplied Items" parts drawer with live stock and discount rates, and "Upload Bill" shortcut.
 - `frontend/src/utils/search.ts`: Created tokenized search engine with `matchSearchTokens` and automotive domain synonym/stem expansions (`filter`/`filt`, `brake`/`brk`/`pad`/`shoe`, `cushion`/`shock`/`damper`, `clutch`/`clt`, etc.).
 - `backend/app/models/brand.py`: Created `Brand` model for genuine and aftermarket spares catalog manufacturers.
 - `backend/app/models/mechanic.py`: Created `Mechanic` model and `MechanicBrandCommission` table for per-mechanic, per-brand percentage matrices.
@@ -25,6 +33,20 @@ and follows the governance instructions established in `AGENTS.md`.
 - `docs/requirement.md`: Documented business requirements, user stories, and acceptance criteria for brands, mechanic commissions, date-wise ledgers, and search filters.
 
 ### Updated
+- `frontend/src/types/index.ts`: Added `"Search"` to `NavigationSection`.
+- `frontend/src/components/layout/GlassSidebar.tsx`: Added dedicated `Search` navigation tab with icon and "Fast" badge right below Dashboard.
+- `frontend/src/app/page.tsx`: Integrated `SearchView` component into the App Router view switcher.
+- `docs/ui-architecture.md`: Updated Section 3 Mermaid diagram, directory responsibility ledger, `NavigationSection` model, and page hierarchy table.
+- `docs/frontend-development-milestones.md`: Added Milestone F9 tracking dedicated Quick Spares Search Tab and card lookup.
+- `backend/app/models/spare_part.py`: Added `supplier_id` foreign key (`SET NULL` on delete), `supplier_name` cached column, and `supplier_discount` purchase discount percentage.
+- `backend/app/services/import_service.py`: Extended `import_parts_from_excel()` to link incoming items to selected wholesale suppliers, calculate cost based on supplier discount, and map brand overrides.
+- `backend/app/services/inventory_service.py`: Enhanced manual part creation to look up supplier defaults when creating parts under a supplier.
+- `backend/app/api/v1/endpoints/imports.py`: Updated `POST /api/v1/imports/parts-excel` to accept `supplier_id`, `brand_name`, and `default_supplier_discount` form fields.
+- `backend/app/api/v1/endpoints/spare_parts.py`: Added `supplier_id` query filter parameter and enabled Counter Staff to update part records.
+- `frontend/src/components/views/InventoryView.tsx`: Integrated Supplier filter dropdown, "Supplier & Disc" table column, supplier selection in Add/Edit part modals, and Excel upload with supplier selection.
+- `frontend/src/types/index.ts`: Extended `SparePart` and `Supplier` TypeScript interfaces with supplier attributes.
+- `frontend/src/api/modules/parts.api.ts` & `frontend/src/api/modules/imports.api.ts`: Updated to pass supplier parameters in Excel imports and catalog fetches.
+- `backend/seed_data.py`: Seeded 3 wholesale distributor partners (Kalyani Honda, Om Sai Auto Spares, National Hero) and linked 98 initial parts with supplier discounts.
 - `backend/app/repositories/spare_part_repo.py`: Implemented tokenized multi-attribute search in `search_parts()` with SQL `AND` joining across terms and domain synonym expansions matching across item name, OEM part number, bike model, brand, model number, and barcode.
 - `backend/app/api/v1/endpoints/spare_parts.py`: Opened `PUT /api/v1/parts/{id}` to counter staff roles and extended query limit up to 500.
 - `frontend/src/api/modules/parts.api.ts`: Increased catalog fetch limit to 500 items for zero-latency client-side token search.
@@ -37,6 +59,11 @@ and follows the governance instructions established in `AGENTS.md`.
 - `docs/docker-architecture.md`: Updated Section 4.1 frontend container specs and added Section 6.5 operational guide for rebuilding the frontend container after source code changes.
 - `docs/database-design.md`: Documented `brands`, `mechanics`, `mechanic_brand_commissions` tables, new sale columns, and updated ER diagrams.
 - `docs/api-reference.md`: Documented Brands Master API, Mechanics & Commissions API, Part update endpoint, billing checkout commission payloads, and tokenized search query semantics.
+
+### Fixed
+- `frontend/src/components/views/InventoryView.tsx`: Fixed duplicate try/catch code block in `handleFileChange` preventing Next.js Webpack compilation.
+- `frontend/src/types/index.ts` & `frontend/src/data/mock-data.ts`: Resolved TypeScript property requirement conflict on `Supplier.phone` allowing clean static build.
+- `backend/alembic/versions/a5c007d4e19b_create_suppliers_table_and_add_supplier_.py`: Added `server_default="0.00"` on `spare_parts.supplier_discount` preventing null value constraint violation on existing rows during database migration.
 
 ## 2026-11-25
 

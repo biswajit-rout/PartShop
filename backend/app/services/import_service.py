@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.spare_part import SparePart
+from app.models.supplier import Supplier
 from app.models.stock_movement import StockMovement, StockMovementType
 from app.schemas.imports import ImportSummaryResponse, RowErrorDetail
 
@@ -20,13 +21,29 @@ class ImportService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def import_parts_from_excel(self, file: UploadFile) -> ImportSummaryResponse:
+    async def import_parts_from_excel(
+        self,
+        file: UploadFile,
+        supplier_id: int | None = None,
+        brand_name_override: str | None = None,
+        default_supplier_discount: Decimal | None = None,
+    ) -> ImportSummaryResponse:
         # 1. Validate file extension
         if not file.filename or not file.filename.endswith((".xlsx", ".xlsm")):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid file format. Please upload an Excel file ending with .xlsx.",
             )
+
+        # Look up supplier details if supplier_id was passed
+        supplier_name: str | None = None
+        supplier_default_disc: Decimal = Decimal("0.00")
+        if supplier_id:
+            supp_res = await self.db.execute(select(Supplier).where(Supplier.id == supplier_id))
+            supplier = supp_res.scalar_one_or_none()
+            if supplier:
+                supplier_name = supplier.name
+                supplier_default_disc = supplier.default_discount_percentage
 
         # 2. Read file bytes into memory
         contents = await file.read()
@@ -160,7 +177,11 @@ class ImportService:
             compatible_bikes = str(get_val("compatible_bikes", "")).strip() or None
 
             # Infer brand if not provided
-            brand_name = str(get_val("brand_name", "")).strip()
+            brand_name = (
+                brand_name_override.strip()
+                if brand_name_override and brand_name_override.strip()
+                else str(get_val("brand_name", "")).strip()
+            )
             if not brand_name:
                 if compatible_bikes and "honda" in compatible_bikes.lower():
                     brand_name = "Honda"
@@ -209,11 +230,25 @@ class ImportService:
                 raw_selling = get_val("selling_price", 0)
                 selling_price = Decimal(str(raw_selling or 0))
 
-                raw_discount = get_val("discount", 0)
-                discount_rate = Decimal(str(raw_discount or 0))
-                # If discount is written as 14 instead of 0.14, normalize
-                if discount_rate > 1:
-                    discount_rate = discount_rate / Decimal("100.00")
+                # Determine supplier discount percentage
+                raw_discount = get_val("discount")
+                if raw_discount is not None and str(raw_discount).strip() != "":
+                    val = Decimal(str(raw_discount))
+                    if val > 1:
+                        supplier_discount = round(val, 2)
+                        discount_rate = val / Decimal("100.00")
+                    else:
+                        supplier_discount = round(val * Decimal("100.00"), 2)
+                        discount_rate = val
+                elif default_supplier_discount is not None and default_supplier_discount > 0:
+                    supplier_discount = round(Decimal(str(default_supplier_discount)), 2)
+                    discount_rate = supplier_discount / Decimal("100.00")
+                elif supplier_default_disc > 0:
+                    supplier_discount = supplier_default_disc
+                    discount_rate = supplier_default_disc / Decimal("100.00")
+                else:
+                    supplier_discount = Decimal("0.00")
+                    discount_rate = Decimal("0.00")
 
                 raw_purchase = get_val("purchase_price")
                 if raw_purchase is not None and str(raw_purchase).strip() != "":
@@ -238,13 +273,16 @@ class ImportService:
                 skipped_count += 1
                 continue
 
-            # Instantiate SparePart
+            # Instantiate SparePart with mapped supplier attributes
             new_part = SparePart(
                 item_name=item_name,
                 brand_name=brand_name,
                 part_number=part_number,
                 model_number=str(get_val("model_number", "")).strip() or None,
                 compatible_bikes=compatible_bikes,
+                supplier_id=supplier_id,
+                supplier_name=supplier_name,
+                supplier_discount=supplier_discount,
                 quantity=quantity,
                 min_stock_alert=min_stock_alert,
                 rack_number=str(get_val("rack_number", "")).strip() or None,
@@ -279,6 +317,8 @@ class ImportService:
 
         return ImportSummaryResponse(
             filename=file.filename or "uploaded.xlsx",
+            supplier_id=supplier_id,
+            supplier_name=supplier_name,
             total_rows_processed=total_rows,
             imported_count=imported_count,
             skipped_count=skipped_count,

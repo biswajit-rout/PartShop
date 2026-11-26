@@ -1,6 +1,8 @@
 from fastapi import HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.spare_part import SparePart
+from app.models.supplier import Supplier
 from app.models.stock_movement import StockMovement, StockMovementType
 from app.repositories.spare_part_repo import SparePartRepository
 from app.schemas.spare_part import SparePartCreate, SparePartUpdate
@@ -35,7 +37,19 @@ class InventoryService:
                     detail=f"Spare part with Barcode '{part_data.barcode}' already exists.",
                 )
 
-        new_part = SparePart(**part_data.model_dump())
+        part_dict = part_data.model_dump()
+
+        # If supplier_id is provided, auto-populate supplier_name and discount if missing
+        if part_data.supplier_id:
+            supp_res = await self.db.execute(select(Supplier).where(Supplier.id == part_data.supplier_id))
+            supplier = supp_res.scalar_one_or_none()
+            if supplier:
+                if not part_dict.get("supplier_name"):
+                    part_dict["supplier_name"] = supplier.name
+                if not part_dict.get("supplier_discount"):
+                    part_dict["supplier_discount"] = supplier.default_discount_percentage
+
+        new_part = SparePart(**part_dict)
         created = await self.repo.create(new_part)
 
         # Record opening stock movement if initial quantity > 0
@@ -76,14 +90,16 @@ class InventoryService:
         self,
         query: str | None = None,
         brand: str | None = None,
+        supplier_id: int | None = None,
         low_stock_only: bool = False,
         skip: int = 0,
         limit: int = 50,
     ) -> tuple[list[SparePart], int]:
-        """Search parts across name, part #, bike model, brand with filters and pagination."""
+        """Search parts across name, part #, bike model, brand, supplier with filters and pagination."""
         return await self.repo.search_parts(
             query=query,
             brand=brand,
+            supplier_id=supplier_id,
             low_stock_only=low_stock_only,
             skip=skip,
             limit=limit,
@@ -105,8 +121,18 @@ class InventoryService:
         old_quantity = part.quantity
         new_quantity = update_data.quantity
 
-        # Update only fields that were provided (exclude_unset=True)
-        for field, value in update_data.model_dump(exclude_unset=True).items():
+        update_dict = update_data.model_dump(exclude_unset=True)
+
+        # If supplier_id was updated without explicit supplier_name, resolve it
+        if "supplier_id" in update_dict and update_dict["supplier_id"]:
+            if not update_dict.get("supplier_name"):
+                supp_res = await self.db.execute(select(Supplier).where(Supplier.id == update_dict["supplier_id"]))
+                supplier = supp_res.scalar_one_or_none()
+                if supplier:
+                    update_dict["supplier_name"] = supplier.name
+
+        # Update only fields that were provided
+        for field, value in update_dict.items():
             setattr(part, field, value)
 
         # If quantity was modified, record an audit movement

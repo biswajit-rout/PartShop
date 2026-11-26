@@ -3,7 +3,7 @@
 > **Document Purpose**: Living progress tracker, step-by-step curriculum, code change ledger, and architectural guide for integrating the Next.js 16 Liquid Glass frontend with the live FastAPI backend.  
 > **Source of Truth**: Active Codebase (`d:/Programming/PartShop/frontend`)  
 > **Governance**: Maintained according to rules established in `AGENTS.md`.  
-> **Last Updated**: 2026-11-25  
+> **Last Updated**: 2026-11-26  
 
 ---
 
@@ -22,12 +22,16 @@ flowchart LR
     F2 --> F3["Milestone F3<br/>Inventory & Excel<br/>(Done)"]
     F3 --> F4["Milestone F4<br/>Analytics & Reports<br/>(Done)"]
     F4 --> F5["Milestone F5<br/>Zero-Mock Verification<br/>(Done)"]
+    F5 --> F6["Milestone F6<br/>Brands & Mechanics<br/>(Done)"]
+    F6 --> F7["Milestone F7<br/>Token Search Engine<br/>(Done)"]
+    F7 --> F8["Milestone F8<br/>Suppliers & Purchase Disc<br/>(Done)"]
+    F8 --> F9["Milestone F9<br/>Dedicated Search Tab<br/>(Done)"]
 
     classDef done fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ecfdf5;
     classDef current fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#cbd5e1;
     classDef pending fill:#0f172a,stroke:#64748b,stroke-width:1px,color:#94a3b8;
 
-    class F0,F1,F2,F3,F4,F5 done;
+    class F0,F1,F2,F3,F4,F5,F6,F7,F8,F9 done;
 ```
 
 ---
@@ -44,6 +48,8 @@ flowchart LR
 | **Milestone F5** | **Zero-Mock Full-Stack Verification** | Eliminate all mock data imports; verify end-to-end full stack in Docker Compose. | `Completed` | 2026-11-25 |
 | **Milestone F6** | **Brands Master & Mechanic Commission Matrix** | Brands CRUD modal, Edit Part modal with live stock adjustment, bike model search autocomplete on POS counter, and date-wise mechanic parts/commission ledger. | `Completed` | 2026-11-26 |
 | **Milestone F7** | **Tokenized Automotive Search Engine** | Multi-token search with automotive stem/abbreviation expansions (`filter`/`filt`, `brake`/`brk`, `cushion`/`shock`) across all catalog attributes. | `Completed` | 2026-11-26 |
+| **Milestone F8** | **Wholesale Supplier Management & Purchase Discounts** | Live supplier directory, "+ Add / Edit Supplier" modals, "View Supplied Items" parts drawer, Excel workbook import under supplier with purchase discount mapping, and inventory supplier filtering. | `Completed` | 2026-11-26 |
+| **Milestone F9** | **Dedicated Quick Spares Search Tab** | Dedicated `SearchView.tsx` with hero search input, quick preset chips, and detailed part cards (Item Name, Price, Supported Model, Supplier Details, Quantity, Selling Price, Rack No). | `Completed` | 2026-11-26 |
 
 ---
 
@@ -334,3 +340,56 @@ Connected root controller authentication gate:
   - `partshop-postgres`: Port 5432 (PostgreSQL 16 Alpine with persistent volume `pgdata`)
   - `partshop-backend`: Port 8001 (FastAPI Python 3.12 REST API with live hot-reloading)
   - `partshop-frontend`: Port 3000 (Next.js 16 App Router with Liquid Glass UI)
+
+---
+
+### Milestone F8: Wholesale Supplier Management & Purchase Discounts
+- **Status**: `Completed` (2026-11-26)
+- **Objective**: Implement comprehensive wholesale supplier partner directory, supplier items drawer, Excel workbook catalog import with automatic supplier and purchase discount inheritance, and inventory supplier filtering.
+
+#### 1. File Created: `frontend/src/api/modules/suppliers.api.ts`
+- Provides `suppliersApi.getAll(activeOnly)`, `suppliersApi.getById(id)`, `suppliersApi.create(supplierData)`, `suppliersApi.update(id, supplierData)`, `suppliersApi.delete(id)`, and `suppliersApi.getSupplierParts(supplierId)`.
+- Includes `mapBackendSupplierToFrontend` adapter ensuring clean camelCase contracts (`defaultDiscountPercentage`, `totalPartsCount`).
+
+#### 2. File Updated: `frontend/src/components/views/SuppliersView.tsx`
+- **Live Wholesale Directory**: Real-time rendering of all distributor partners with live mapped parts count (`totalPartsCount`) and default purchase discount badges.
+- **"+ Add Supplier" & "Edit Supplier" Modals**: Allows counter staff and store managers to register new agencies, update GSTIN compliance numbers, phone, address, and default purchase discount rates.
+- **"View Supplied Items" Parts Drawer**: Interactive modal showing all parts provided by a selected supplier, including part number, OEM description, bike model compatibility, purchase discount %, purchase cost, MRP, and stock level.
+- **"Upload Supplier Catalog / Bill" Action**: Quick modal to upload Excel workbooks directly tagged to the selected distributor.
+
+#### 3. File Updated: `frontend/src/components/views/InventoryView.tsx`
+- **Supplier & Purchase Discount Column**: Added to inventory table displaying distributor name and purchase discount percentage (e.g. `14.5%`).
+- **Live Supplier Filter**: Dropdown filter enabling staff to instantly isolate parts sourced from specific suppliers (e.g. "Kalyani Honda Spares", "Om Sai Auto Spares").
+- **Manual Part Modals with Supplier**: Add Part and Edit Part modals enhanced with Supplier selection dropdown and purchase discount rate input.
+- **Excel Upload with Supplier Selection**: Upload modal allows picking the source distributor and setting/overriding the wholesale purchase discount percentage applied across the uploaded file.
+
+#### 4. Verification & Container Health
+- **Next.js Compilation**: Recompiled successfully in Docker Compose runner (`docker compose up -d --build frontend`) with 0 TypeScript and Webpack errors.
+- **Zero-Mock Verification**: Live end-to-end communication with FastAPI endpoints (`/api/v1/suppliers`, `/api/v1/suppliers/{id}/parts`, `/api/v1/imports/parts-excel`).
+
+---
+
+### Milestone F9: Dedicated Quick Spares Search Tab & Card-Based Lookup
+- **Status**: `Completed` (2026-11-26)
+- **Objective**: Create a focused, dedicated search terminal tab where counter staff can find any motorcycle spare part in under 1 second via a minimalist hero search bar, displaying matches in comprehensive Liquid Glass cards.
+
+#### 1. File Created: `frontend/src/components/views/SearchView.tsx`
+- **Minimalist Hero Search Interface**: Prominent search bar as the page's primary focal point with autofocus, clear button (`X`), and keyboard shortcut hints.
+- **Popular Preset Chips**: Quick search shortcut buttons for frequent counter requests ("Bajaj Pulsar Air filter", "Activa Brake Pad", "Splendor Clutch Plate", "Chain Sprocket", "Bosch Spark Plug").
+- **Card-Based Anatomy**: Every matched item renders as a full `GlassCard` featuring:
+  - **Item Name**: Full description with brand tag and stock status badge (`GlassBadge`).
+  - **Price & Selling Price**: Prominent counter retail price (`MRP`) and purchase cost.
+  - **Supported Models**: Compatible motorcycle fitment with bike icon.
+  - **Supplier Details**: Wholesale supplier name and purchase discount percentage badge (e.g. `14.5% Disc`).
+  - **Quantity**: Units on shelf with color-coded stock alerts.
+  - **Rack No**: Physical shop bin / shelf locator (e.g. `Rack: B-04`).
+  - **One-Click Actions**: Quick copy button for part numbers and "Bill Item" action button navigating directly to counter POS checkout.
+
+#### 2. Files Updated
+- `frontend/src/types/index.ts`: Added `"Search"` to `NavigationSection`.
+- `frontend/src/components/layout/GlassSidebar.tsx`: Added dedicated `Search` tab with `Search` icon and `"Fast"` badge in primary navigation dock.
+- `frontend/src/app/page.tsx`: Integrated `SearchView` component with catalog state and navigation callbacks.
+
+#### 3. Verification & Container Health
+- **Next.js Compilation**: `Generating static pages (4/4)` built cleanly in Docker with 0 errors.
+- **HTTP Status Check**: Verified `http://localhost:3000` responds with status `200`.

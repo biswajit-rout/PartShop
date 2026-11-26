@@ -10,6 +10,9 @@ class SparePartBase(BaseModel):
     part_number: str
     model_number: str | None = None
     compatible_bikes: str | None = None
+    supplier_id: int | None = None
+    supplier_name: str | None = None
+    supplier_discount: Decimal = Decimal("0.00")
     quantity: int = 0
     min_stock_alert: int = 5
     rack_number: str | None = None
@@ -33,6 +36,9 @@ class SparePartUpdate(BaseModel):
     part_number: str | None = None
     model_number: str | None = None
     compatible_bikes: str | None = None
+    supplier_id: int | None = None
+    supplier_name: str | None = None
+    supplier_discount: Decimal | None = None
     quantity: int | None = None
     min_stock_alert: int | None = None
     rack_number: str | None = None

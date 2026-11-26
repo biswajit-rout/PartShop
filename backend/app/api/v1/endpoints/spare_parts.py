@@ -51,6 +51,8 @@ async def list_spare_parts(
         None, description="Search term across name, part #, or bike model"),
     brand: str | None = Query(
         None, description="Filter by brand (e.g. Hero, Bajaj)"),
+    supplier_id: int | None = Query(
+        None, description="Filter by supplier ID"),
     low_stock_only: bool = Query(
         False, description="Filter only items below min stock threshold"),
     skip: int = Query(0, ge=0, description="Pagination offset"),
@@ -61,6 +63,7 @@ async def list_spare_parts(
     items, total = await service.search_catalog(
         query=q,
         brand=brand,
+        supplier_id=supplier_id,
         low_stock_only=low_stock_only,
         skip=skip,
         limit=limit,

@@ -8,6 +8,9 @@ export interface BackendSparePart {
   part_number: string;
   model_number?: string | null;
   compatible_bikes?: string | null;
+  supplier_id?: number | null;
+  supplier_name?: string | null;
+  supplier_discount?: string | number;
   quantity: number;
   min_stock_alert: number;
   rack_number?: string | null;
@@ -43,6 +46,9 @@ export function mapBackendPartToFrontend(part: BackendSparePart): SparePart {
     partNumber: part.part_number,
     modelNumber: part.model_number || "",
     compatibleBikes: part.compatible_bikes || "",
+    supplierId: part.supplier_id || null,
+    supplierName: part.supplier_name || null,
+    supplierDiscount: Number(part.supplier_discount || 0),
     quantity: part.quantity,
     rackNumber: part.rack_number || "Unassigned",
     purchasePrice: Number(part.purchase_price),
@@ -56,13 +62,14 @@ export function mapBackendPartToFrontend(part: BackendSparePart): SparePart {
 
 export const partsApi = {
   /**
-   * Search and list spare parts with optional text and brand filters.
+   * Search and list spare parts with optional text, brand, and supplier filters.
    */
-  async getAll(search?: string, brand?: string): Promise<SparePart[]> {
+  async getAll(search?: string, brand?: string, supplierId?: number | string): Promise<SparePart[]> {
     const data = await apiClient<PaginatedPartsResponse>("/parts", {
       params: {
         q: search,
         brand: brand && brand !== "All" ? brand : undefined,
+        supplier_id: supplierId && supplierId !== "All" ? supplierId : undefined,
         limit: 500,
       },
       cache: "no-store",

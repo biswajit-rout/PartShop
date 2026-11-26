@@ -1,5 +1,6 @@
 from app.models.base import TimestampMixin
 from app.models.user import User, UserRole
+from app.models.supplier import Supplier
 from app.models.spare_part import SparePart
 from app.models.brand import Brand
 from app.models.mechanic import Mechanic, MechanicBrandCommission
@@ -10,6 +11,7 @@ __all__ = [
     "TimestampMixin",
     "User",
     "UserRole",
+    "Supplier",
     "SparePart",
     "Brand",
     "Mechanic",

@@ -2,6 +2,7 @@ import React from "react";
 import { NavigationSection } from "@/types";
 import {
   LayoutDashboard,
+  Search,
   Package,
   ReceiptText,
   Store,
@@ -24,6 +25,7 @@ interface GlassSidebarProps {
 
 const NAV_ITEMS: { label: NavigationSection; icon: typeof LayoutDashboard; badge?: string }[] = [
   { label: "Dashboard", icon: LayoutDashboard },
+  { label: "Search", icon: Search, badge: "Fast" },
   { label: "Inventory", icon: Package, badge: "1.2k" },
   { label: "Billing", icon: ReceiptText, badge: "POS" },
   { label: "Suppliers", icon: Store },

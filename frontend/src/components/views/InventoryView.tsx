@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { SparePart, Brand } from "@/types";
+import { SparePart, Brand, Supplier } from "@/types";
 import { formatRupees } from "@/utils/formatters";
 import { matchSearchTokens } from "@/utils/search";
-import { importsApi, partsApi, brandsApi, ImportSummaryResponse } from "@/api";
+import { importsApi, partsApi, brandsApi, suppliersApi, ImportSummaryResponse } from "@/api";
 import PageHeading from "@/components/common/PageHeading";
 import GlassBadge from "@/components/ui/glass/GlassBadge";
 import GlassButton from "@/components/ui/glass/GlassButton";
@@ -22,8 +22,10 @@ import {
   X,
   Edit2,
   Tag,
+  Store,
   Layers,
   Wrench,
+  Percent,
 } from "lucide-react";
 
 interface InventoryViewProps {
@@ -41,15 +43,21 @@ export default function InventoryView({
 }: InventoryViewProps) {
   const [selectedBrand, setSelectedBrand] = useState<string>("All");
   const [selectedStatus, setSelectedStatus] = useState<string>("All");
+  const [selectedSupplier, setSelectedSupplier] = useState<string>("All");
 
   // Excel Bulk Import States
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadSupplierId, setUploadSupplierId] = useState<string>("");
+  const [uploadBrandOverride, setUploadBrandOverride] = useState<string>("");
+  const [uploadDiscountOverride, setUploadDiscountOverride] = useState<string>("15.00");
   const [isUploading, setIsUploading] = useState(false);
   const [importSummary, setImportSummary] = useState<ImportSummaryResponse | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
 
-  // Live Brands Master
+  // Live Brands & Suppliers Master
   const [availableBrands, setAvailableBrands] = useState<Brand[]>([]);
+  const [availableSuppliers, setAvailableSuppliers] = useState<Supplier[]>([]);
   const [showBrandsModal, setShowBrandsModal] = useState(false);
   const [newBrandName, setNewBrandName] = useState("");
   const [newBrandCode, setNewBrandCode] = useState("");
@@ -64,6 +72,8 @@ export default function InventoryView({
   const [newPart, setNewPart] = useState({
     item_name: "",
     brand_name: "Hero",
+    supplier_id: "",
+    supplier_discount: "0",
     part_number: "",
     model_number: "",
     compatible_bikes: "",
@@ -81,6 +91,8 @@ export default function InventoryView({
   const [editForm, setEditForm] = useState({
     item_name: "",
     brand_name: "",
+    supplier_id: "",
+    supplier_discount: "0",
     part_number: "",
     model_number: "",
     compatible_bikes: "",
@@ -91,33 +103,47 @@ export default function InventoryView({
     barcode: "",
   });
 
-  // Load brands master on mount
+  // Load brands and suppliers master on mount
   useEffect(() => {
-    async function loadBrands() {
+    async function loadMasterData() {
       try {
-        const brands = await brandsApi.getAll();
+        const [brands, supps] = await Promise.all([
+          brandsApi.getAll(),
+          suppliersApi.getAll(),
+        ]);
         if (brands && brands.length > 0) {
           setAvailableBrands(brands);
         }
+        if (supps && supps.length > 0) {
+          setAvailableSuppliers(supps);
+          if (supps[0]) {
+            setUploadSupplierId(String(supps[0].id));
+            setUploadDiscountOverride(String(supps[0].defaultDiscountPercentage || 15));
+          }
+        }
       } catch (err) {
-        console.warn("Could not fetch brands master:", err);
+        console.warn("Could not fetch brands or suppliers master:", err);
       }
     }
-    loadBrands();
+    loadMasterData();
   }, []);
 
-  // Tokenized multi-attribute search filter with automotive synonym expansion
+  // Tokenized multi-attribute search filter with automotive synonym expansion & supplier filter
   const filteredProducts = products.filter((item) => {
-    const searchTarget = `${item.name} ${item.brand} ${item.partNumber} ${item.modelNumber} ${item.compatibleBikes} ${item.rackNumber} ${item.barcode}`;
+    const searchTarget = `${item.name} ${item.brand} ${item.partNumber} ${item.modelNumber} ${item.compatibleBikes} ${item.rackNumber} ${item.barcode} ${item.supplierName || ""}`;
     const matchesSearch = matchSearchTokens(searchTarget, searchQuery);
     const matchesBrand =
       selectedBrand === "All" || item.brand.toLowerCase() === selectedBrand.toLowerCase();
     const matchesStatus =
       selectedStatus === "All" || item.status === selectedStatus;
-    return matchesSearch && matchesBrand && matchesStatus;
+    const matchesSupplier =
+      selectedSupplier === "All" ||
+      String(item.supplierId) === String(selectedSupplier) ||
+      (item.supplierName && item.supplierName.toLowerCase() === selectedSupplier.toLowerCase());
+    return matchesSearch && matchesBrand && matchesStatus && matchesSupplier;
   });
 
-  // Handle Real Excel Upload
+  // Handle Real Excel Upload with selected Supplier & Discount
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -127,8 +153,15 @@ export default function InventoryView({
     setImportSummary(null);
 
     try {
-      const summary = await importsApi.uploadCatalogExcel(file);
+      const discount = parseFloat(uploadDiscountOverride);
+      const summary = await importsApi.uploadCatalogExcel(
+        file,
+        uploadSupplierId ? uploadSupplierId : undefined,
+        uploadBrandOverride.trim() || undefined,
+        !isNaN(discount) ? discount : undefined
+      );
       setImportSummary(summary);
+      setShowUploadModal(false);
       if (onRefreshCatalog) {
         onRefreshCatalog();
       }
@@ -157,6 +190,8 @@ export default function InventoryView({
       await partsApi.create({
         item_name: newPart.item_name,
         brand_name: newPart.brand_name,
+        supplier_id: newPart.supplier_id ? parseInt(newPart.supplier_id, 10) : undefined,
+        supplier_discount: parseFloat(newPart.supplier_discount) || 0,
         part_number: newPart.part_number,
         model_number: newPart.model_number || undefined,
         compatible_bikes: newPart.compatible_bikes || undefined,
@@ -171,6 +206,8 @@ export default function InventoryView({
       setNewPart({
         item_name: "",
         brand_name: availableBrands[0]?.name || "Hero",
+        supplier_id: "",
+        supplier_discount: "0",
         part_number: "",
         model_number: "",
         compatible_bikes: "",
@@ -197,6 +234,8 @@ export default function InventoryView({
     setEditForm({
       item_name: part.name,
       brand_name: part.brand,
+      supplier_id: part.supplierId ? String(part.supplierId) : "",
+      supplier_discount: String(part.supplierDiscount || "0"),
       part_number: part.partNumber,
       model_number: part.modelNumber || "",
       compatible_bikes: part.compatibleBikes || "",
@@ -221,6 +260,8 @@ export default function InventoryView({
       await partsApi.update(editingPart.id, {
         item_name: editForm.item_name,
         brand_name: editForm.brand_name,
+        supplier_id: editForm.supplier_id ? parseInt(editForm.supplier_id, 10) : undefined,
+        supplier_discount: parseFloat(editForm.supplier_discount) || 0,
         part_number: editForm.part_number,
         model_number: editForm.model_number || undefined,
         compatible_bikes: editForm.compatible_bikes || undefined,
@@ -299,7 +340,7 @@ export default function InventoryView({
               variant="secondary"
               size="sm"
               icon={isUploading ? <Sparkles size={14} className="animate-spin" /> : <Upload size={14} />}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => setShowUploadModal(true)}
               disabled={isUploading}
             >
               {isUploading ? "Uploading Spreadsheet..." : "Import Excel (.xlsx)"}
@@ -384,7 +425,7 @@ export default function InventoryView({
         </div>
 
         {/* Brand Dropdown */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Filter size={15} className="text-slate-400 shrink-0" />
           <select
             value={selectedBrand}
@@ -394,6 +435,20 @@ export default function InventoryView({
             <option value="All" className="bg-slate-900">All Brands</option>
             {availableBrands.map((b) => (
               <option key={b.id} value={b.name} className="bg-slate-900">{b.name}</option>
+            ))}
+          </select>
+
+          {/* Supplier Dropdown */}
+          <select
+            value={selectedSupplier}
+            onChange={(e) => setSelectedSupplier(e.target.value)}
+            className="glass-input h-10 px-3 rounded-xl text-xs font-sans text-slate-200 outline-none max-w-[190px]"
+          >
+            <option value="All" className="bg-slate-900">All Suppliers</option>
+            {availableSuppliers.map((s) => (
+              <option key={s.id} value={s.id} className="bg-slate-900">
+                {s.name} ({s.defaultDiscountPercentage}%)
+              </option>
             ))}
           </select>
 
@@ -414,12 +469,13 @@ export default function InventoryView({
       {/* Inventory Table */}
       <div className="glass-panel rounded-3xl overflow-hidden border border-white/10">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs font-sans min-w-[950px]">
+          <table className="w-full text-left text-xs font-sans min-w-[1050px]">
             <thead className="bg-white/[0.03] text-slate-400 font-mono uppercase border-b border-white/10 text-[11px]">
               <tr>
                 <th className="py-3.5 px-4">Part / Description</th>
                 <th className="py-3.5 px-4">Brand</th>
                 <th className="py-3.5 px-4">Part #</th>
+                <th className="py-3.5 px-4">Supplier & Disc</th>
                 <th className="py-3.5 px-4">Compatible Bikes</th>
                 <th className="py-3.5 px-4">Rack Loc.</th>
                 <th className="py-3.5 px-4">Stock Qty</th>
@@ -448,7 +504,21 @@ export default function InventoryView({
                   <td className="py-3.5 px-4 text-sky-400 font-bold">
                     {item.partNumber}
                   </td>
-                  <td className="py-3.5 px-4 font-sans text-slate-300 max-w-[200px] truncate">
+                  <td className="py-3.5 px-4 font-sans">
+                    {item.supplierName ? (
+                      <div>
+                        <div className="font-semibold text-white truncate max-w-[150px]" title={item.supplierName}>
+                          {item.supplierName}
+                        </div>
+                        <span className="text-[10px] text-emerald-400 font-mono font-bold">
+                          {item.supplierDiscount || 0}% purchase disc
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-slate-500 text-[11px]">Unassigned</span>
+                    )}
+                  </td>
+                  <td className="py-3.5 px-4 font-sans text-slate-300 max-w-[180px] truncate" title={item.compatibleBikes}>
                     {item.compatibleBikes || "Universal"}
                   </td>
                   <td className="py-3.5 px-4">
@@ -554,6 +624,41 @@ export default function InventoryView({
                 onChange={(e) => setEditForm({ ...editForm, compatible_bikes: e.target.value })}
                 placeholder="e.g. Hero Splendor, Passion Pro, HF Deluxe"
               />
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    Supplier / Wholesaler
+                  </label>
+                  <select
+                    value={editForm.supplier_id}
+                    onChange={(e) => {
+                      const sId = e.target.value;
+                      const supp = availableSuppliers.find((s) => String(s.id) === String(sId));
+                      setEditForm({
+                        ...editForm,
+                        supplier_id: sId,
+                        supplier_discount: supp ? String(supp.defaultDiscountPercentage) : editForm.supplier_discount,
+                      });
+                    }}
+                    className="glass-input h-10 w-full px-3 rounded-xl text-xs font-sans text-slate-200 outline-none"
+                  >
+                    <option value="" className="bg-slate-900">None / Direct OEM</option>
+                    {availableSuppliers.map((s) => (
+                      <option key={s.id} value={s.id} className="bg-slate-900">{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <GlassInput
+                  label="Supplier Purchase Discount (%)"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  value={editForm.supplier_discount}
+                  onChange={(e) => setEditForm({ ...editForm, supplier_discount: e.target.value })}
+                />
+              </div>
 
               <div className="grid grid-cols-3 gap-3">
                 <GlassInput
@@ -774,6 +879,42 @@ export default function InventoryView({
                 onChange={(e) => setNewPart({ ...newPart, compatible_bikes: e.target.value })}
               />
 
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    Supplier / Wholesaler
+                  </label>
+                  <select
+                    value={newPart.supplier_id}
+                    onChange={(e) => {
+                      const sId = e.target.value;
+                      const supp = availableSuppliers.find((s) => String(s.id) === String(sId));
+                      setNewPart({
+                        ...newPart,
+                        supplier_id: sId,
+                        supplier_discount: supp ? String(supp.defaultDiscountPercentage) : newPart.supplier_discount,
+                      });
+                    }}
+                    className="glass-input h-10 w-full px-3 rounded-xl text-xs font-sans text-slate-200 outline-none"
+                  >
+                    <option value="" className="bg-slate-900">None / Direct OEM</option>
+                    {availableSuppliers.map((s) => (
+                      <option key={s.id} value={s.id} className="bg-slate-900">{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <GlassInput
+                  label="Supplier Purchase Discount (%)"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  placeholder="e.g. 15.00"
+                  value={newPart.supplier_discount}
+                  onChange={(e) => setNewPart({ ...newPart, supplier_discount: e.target.value })}
+                />
+              </div>
+
               <div className="grid grid-cols-3 gap-3">
                 <GlassInput
                   label="Opening Stock *"
@@ -835,6 +976,122 @@ export default function InventoryView({
               </div>
             </form>
           </GlassCard>
+        </div>
+      )}
+
+      {/* Excel Upload with Supplier Selection Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
+          <div className="glass-panel w-full max-w-lg rounded-3xl p-6 border border-white/15 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center">
+                  <Upload size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">
+                    Import Catalog / Distributor Bill (.xlsx)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Upload spreadsheet under a specific supplier with wholesale discount mapping
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowUploadModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-mono text-slate-300 mb-1">
+                  Select Supplier / Wholesaler *
+                </label>
+                <select
+                  value={uploadSupplierId}
+                  onChange={(e) => {
+                    const sId = e.target.value;
+                    setUploadSupplierId(sId);
+                    const supp = availableSuppliers.find((s) => String(s.id) === String(sId));
+                    if (supp) {
+                      setUploadDiscountOverride(String(supp.defaultDiscountPercentage || 15));
+                    }
+                  }}
+                  className="glass-input h-10 w-full px-3.5 rounded-xl text-xs font-sans text-slate-200 outline-none"
+                >
+                  <option value="" className="bg-slate-900">None / Direct OEM</option>
+                  {availableSuppliers.map((s) => (
+                    <option key={s.id} value={s.id} className="bg-slate-900">
+                      {s.name} ({s.defaultDiscountPercentage}% default disc)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-mono text-slate-300 mb-1">
+                    Brand Override (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Honda, Bajaj, Hero"
+                    value={uploadBrandOverride}
+                    onChange={(e) => setUploadBrandOverride(e.target.value)}
+                    className="glass-input h-10 w-full px-3.5 rounded-xl text-xs font-sans"
+                  />
+                  <span className="text-[10px] text-slate-400 block mt-0.5">
+                    If empty, inferred from sheet
+                  </span>
+                </div>
+                <div>
+                  <label className="block text-xs font-mono text-slate-300 mb-1">
+                    Supplier Purchase Discount (%) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    placeholder="e.g. 14.50"
+                    value={uploadDiscountOverride}
+                    onChange={(e) => setUploadDiscountOverride(e.target.value)}
+                    className="glass-input h-10 w-full px-3.5 rounded-xl text-xs font-mono font-bold text-emerald-400"
+                  />
+                  <span className="text-[10px] text-slate-400 block mt-0.5">
+                    Applied to wholesale purchase cost
+                  </span>
+                </div>
+              </div>
+
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-white/20 hover:border-sky-400/50 rounded-2xl p-6 text-center cursor-pointer transition-all bg-white/[0.02] hover:bg-sky-500/5 space-y-2 mt-2"
+              >
+                <Upload size={28} className="mx-auto text-sky-400 animate-bounce" />
+                <div className="text-xs font-semibold text-white">
+                  Click to select Excel workbook (.xlsx)
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Items will be linked to the selected supplier with the purchase discount applied
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-white/10">
+                <GlassButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowUploadModal(false)}
+                >
+                  Cancel
+                </GlassButton>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

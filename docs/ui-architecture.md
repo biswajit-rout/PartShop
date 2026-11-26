@@ -69,6 +69,7 @@ flowchart TD
 
         subgraph ViewControllers["Domain View Controllers"]
             DV["DashboardView"]
+            SCV["SearchView"]
             IV["InventoryView"]
             BV["BillingView"]
             SV["SuppliersView"]
@@ -186,7 +187,7 @@ flowchart TD
 | `frontend/src/components/common/` | Shared page-level headings and title badges | UI Components |
 | `frontend/src/components/layout/` | Structural shells: `GlassSidebar` (navigation dock) and `GlassHeader` (topbar) | Layout Components |
 | `frontend/src/components/ui/glass/` | Atomic liquid glass primitives (`LiquidBackground`, `GlassCard`, `GlassInput`, etc.)| Presentation Components |
-| `frontend/src/components/views/` | Seven discrete domain modules (`Dashboard`, `Inventory`, `Billing`, etc.) | Feature Module Views |
+| `frontend/src/components/views/` | Eight discrete domain modules (`Dashboard`, `Search`, `Inventory`, `Billing`, etc.) | Feature Module Views |
 
 ---
 
@@ -201,6 +202,7 @@ The current frontend operates as an **App Router SPA (Single Page Application)**
   ```typescript
   export type NavigationSection =
     | "Dashboard"
+    | "Search"
     | "Inventory"
     | "Billing"
     | "Suppliers"
@@ -217,6 +219,7 @@ For high-speed counter POS terminals, full page transitions that cause network r
 | URL Route | Rendered Component | Component Type | Current Implementation State |
 | :--- | :--- | :--- | :--- |
 | `/` (Default: Dashboard) | `DashboardView` | Client Component | **Implemented** (KPIs, Charts, Stock Alerts) |
+| `/` (Tab: Search) | `SearchView` | Client Component | **Implemented** (Dedicated Search Bar, Automotive Stems, Spare Part Cards) |
 | `/` (Tab: Inventory) | `InventoryView` | Client Component | **Implemented** (Catalog, Filters, Excel Spec) |
 | `/` (Tab: Billing) | `BillingView` | Client Component | **Implemented** (POS Barcode Billing, GST, Commission) |
 | `/` (Tab: Suppliers) | `SuppliersView` | Client Component | **Implemented** (Wholesaler Cards, GSTIN) |

@@ -6,3 +6,4 @@ export * from "./modules/imports.api";
 export * from "./modules/reports.api";
 export * from "./modules/brands.api";
 export * from "./modules/mechanics.api";
+export * from "./modules/suppliers.api";

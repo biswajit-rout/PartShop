@@ -76,11 +76,16 @@ Expected tables:
 ### Suppliers
 
 - id
-- supplier\_name
-- contact\_name
-- mobile
+- name
+- contact_person
+- phone
+- email
 - address
-- gst\_number
+- gst_number
+- default_discount_percentage
+- is_active
+- created_at
+- updated_at
 
 ### Mechanics
 
@@ -223,6 +228,56 @@ Exports:
 - Excel
 
 ---
+
+---
+
+## Wholesale Suppliers & Purchase Discount Mapping
+
+Manage multi-brand wholesale distributor partnerships, supplier-provided purchase discount rates, and catalog item linkage.
+
+### Supplier Attributes
+- `id`: Integer primary key
+- `name`: Wholesaler or distributorship business name (unique index)
+- `contact_person`: Primary contact person
+- `phone`: Mobile / contact phone number
+- `email`: Supplier billing email address
+- `address`: Warehouse or shop location
+- `gst_number`: GSTIN compliance registration number
+- `default_discount_percentage`: Default wholesale purchase discount percentage provided to the shop (e.g. 14.50%, 18.00%)
+- `is_active`: Operational status flag
+- `created_at` / `updated_at`: Audit timestamps
+
+### Item Mapping & Purchase Discount Mechanics
+- **Brand & Supplier Separation**: Different brands can be purchased from different suppliers (e.g., *Honda Genuine Spares* from *Kalyani Honda Distributorship* at 14.5% discount; *Bajaj* and *Endurance* from *Om Sai Auto Spares* at 18% discount).
+- **Excel Spreadsheet Import under Supplier**: Cashiers or store managers can select a specific supplier when uploading an Excel workbook (.xlsx). The engine automatically tags every imported part with `supplier_id`, `supplier_name`, and computes the purchase cost based on the supplier's wholesale discount rate (or spreadsheet line-item discount).
+- **Manual Item Creation / Editing**: Inventory creation and edit modals allow selecting the supplier and specifying the exact purchase discount rate.
+- **Supplier Directory & Supplied Parts View**: In the Suppliers view, each supplier displays their live mapped item count. Cashiers can open any supplier to inspect all parts provided by that supplier (OEM SKU, description, brand, compatible bikes, purchase discount %, purchase price, selling price, and stock quantity).
+- **Inventory Cross-Filtering**: The main inventory table displays the supplier name and discount percentage for every item, and includes a live Supplier filter dropdown alongside Brand and Stock Status.
+
+---
+
+## Dedicated Quick Spares Search Tab & Card-Based Lookup
+
+A focused, dedicated search terminal tab (`Search`) optimized for counter staff to find parts in under 1 second.
+
+### Functional Requirements
+- **Minimalist Hero Search Interface**: The search tab features a clean, prominent search bar as the primary focal point with automatic cursor focus and keyboard shortcuts (`Ctrl+K`).
+- **Popular Preset Chips**: Quick search shortcut chips for common workshop inquiries (e.g. "Bajaj Pulsar Air filter", "Activa Brake Pad", "Splendor Clutch Plate", "Chain Sprocket", "Bosch Spark Plug").
+- **Automotive Domain Synonym & Token Expansion**: Supports multi-token unstructured search matching across:
+  - Part Name (with synonyms: filter/filt, brake/pad/shoe, clutch/clt, shock/cushion)
+  - Vehicle / Bike Compatibility (e.g. Pulsar 150, Activa 6G, Splendor Plus)
+  - OEM SKU / Part Number
+  - Manufacturer / Brand
+  - Supplier Name
+  - Barcode & Rack Bin Locator
+- **Card-Based Anatomy**: Every matched item is displayed as a comprehensive information card containing:
+  - **Item Name**: Full description and part title.
+  - **Price & Selling Price**: Prominent counter retail price (`MRP`) and purchase cost.
+  - **Supported Model**: Explicit list of compatible motorcycle models.
+  - **Supplier Details**: Wholesale supplier/distributor name and purchase discount percentage badge.
+  - **Quantity**: Real-time units on hand and color-coded stock availability status (`In Stock`, `Low Stock`, `Out of Stock`).
+  - **Rack No**: Physical shop bin / shelf locator (e.g. `Rack: B-04`).
+  - **One-Click Actions**: Quick copy button for part numbers and "Bill Item" shortcut to seamlessly transition the selected part into a new counter sales invoice.
 
 ---
 

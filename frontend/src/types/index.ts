@@ -1,5 +1,6 @@
 export type NavigationSection =
   | "Dashboard"
+  | "Search"
   | "Inventory"
   | "Billing"
   | "Suppliers"
@@ -17,6 +18,9 @@ export interface SparePart {
   partNumber: string;
   modelNumber: string;
   compatibleBikes: string;
+  supplierId?: number | null;
+  supplierName?: string | null;
+  supplierDiscount?: number | null;
   quantity: number;
   rackNumber: string;
   purchasePrice: number;
@@ -36,13 +40,21 @@ export interface Brand {
 }
 
 export interface Supplier {
-  id: string;
+  id: string | number;
   name: string;
-  contactName: string;
-  mobile: string;
-  address: string;
-  gstNumber: string;
-  totalPurchases: number;
+  contactName?: string;
+  contactPerson?: string;
+  mobile?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  gstNumber?: string;
+  defaultDiscountPercentage?: number;
+  totalPurchases?: number;
+  totalPartsCount?: number;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface MechanicBrandCommission {
