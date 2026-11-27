@@ -7,9 +7,78 @@ and follows the governance instructions established in `AGENTS.md`.
 
 ---
 
+## 2026-11-27
+
+### Added
+- `docker-compose.prod.yml` & `Caddyfile` & `.env.prod.example`: Added production-hardened Docker orchestration featuring a Caddy 2 edge reverse proxy (automatic Let's Encrypt HTTPS and WebSocket proxying), internal-only PostgreSQL and FastAPI networking, non-root production containers, automatic `alembic upgrade head` startup migrations, and container healthchecks.
+- `backend/.dockerignore`: Excluded local `.venv/`, `__pycache__/`, `.env*`, and git metadata from backend Docker build contexts.
+- `backend/app/core/config.py`: Added environment-driven `CORS_ORIGINS` and `CORS_ORIGIN_REGEX` settings with `cors_origins_list` parser.
+- `backend/app/services/billing_service.py` & `backend/app/schemas/billing.py`:
+  - Upgraded `InvoiceUpdateRequest` to accept `items: list[CartItemInput]` and `mechanic_id: int | None`.
+  - Implemented comprehensive invoice line-item modification in `update_invoice()`:
+    - Calculates quantity differential ($\Delta = Q_{new} - Q_{old}$) for each spare part under row-level database locks (`with_for_update()`).
+    - Quantity reductions and item removals automatically restore stock into available inventory and record immutable `StockMovementType.RETURN_IN` (`reference_type="SALE_EDIT"`).
+    - Quantity increases and newly added items check warehouse stock sufficiency, deduct inventory, and record `StockMovementType.SALE_OUT` (`reference_type="SALE_EDIT"`).
+    - Automatically updates line item collections (`sale.items`), recalculates taxable subtotal, line discounts, 18% GST tax, grand total, and mechanic commissions, and refreshes session cache (`expire_all()`).
+- `frontend/src/api/modules/billing.api.ts`: Updated `InvoiceUpdateRequest` interface to support optional `items: CartItemPayload[]` and `mechanic_id`.
+- `frontend/src/components/views/BillingView.tsx`: Upgraded "Modify Invoice" modal to full-featured "Edit Invoice Details & Items" modal:
+  - Supports customer name and phone correction, and payment method selection (Cash, UPI, Card, Credit).
+  - Search and autocomplete dropdown to easily add new parts to an existing invoice.
+  - Interactive items table with +/- quantity steppers, discount percentage inputs, real-time line total calculations, and one-click item removal (trash icon).
+  - Real-time settlement preview displaying Subtotal, 18% GST, and Grand Total.
+  - Automatic inventory stock notice and validation ensuring at least 1 item remains on the bill.
+- `backend/app/models/sale.py`: Added `SaleStatus` enum (`COMPLETED`, `VOIDED`) and `status`, `cancellation_reason`, and `cancelled_at` fields to `Sale` model.
+- `backend/alembic/versions/c9d5e2f1a8b4_add_status_and_cancellation_to_sales.py`: Database migration creating the `salestatus` PostgreSQL enum, adding columns to `sales`, and indexing `status`.
+- `backend/app/schemas/billing.py`: Added `status`, `cancellation_reason`, and `cancelled_at` to `InvoiceResponse`, and created `InvoiceCancelRequest(reason: str | None)`.
+- `backend/app/services/billing_service.py`:
+  - Upgraded `list_invoices()` to support `start_date`, `end_date`, `status`, and `search` query filters.
+  - Implemented `cancel_invoice()` featuring row-level locking (`with_for_update()`), atomic inventory quantity restoration, immutable `StockMovement(movement_type=RETURN_IN, reference_type="SALE_VOID")` logging, and duplicate void prevention.
+  - Guarded `update_invoice()` to reject modifications against voided bills.
+- `backend/app/api/v1/endpoints/billing.py`: Mounted `POST /api/v1/billing/invoices/{invoice_id}/cancel` and added date/status query params to `GET /api/v1/billing/invoices`.
+- `backend/app/services/report_service.py`, `backend/app/services/expense_service.py`, `backend/app/services/mechanic_service.py`: Filtered all financial calculations (Daily Sales, Today's Sales on Dashboard, Net Daily Profit, Weekly Trend, Top Selling Parts, Mechanic Commissions) to exclude `VOIDED` sales.
+- `frontend/src/api/modules/billing.api.ts`: Added `cancelInvoice()` and updated `getInvoices()` to send `startDate`, `endDate`, and `status`.
+- `frontend/src/components/views/BillingView.tsx`:
+  - **Date Range Filters**: Added presets ("All Time", "Today", "This Week", "This Month", "Custom Range") with custom start/end date inputs.
+  - **Status Tabs**: Added filter tabs for `All Invoices`, `🟢 Active`, and `🔴 Voided / Returned`.
+  - **Lifecycle Badges & Strikethrough**: Rendered status badges and strike-through on voided invoice amounts.
+  - **Return & Void Modal**: Dedicated confirmation modal showing line items to be returned to stock, cancellation reason field, and atomic reversal trigger.
+  - **Thermal Receipt Void Banner**: Receipt print dialog displays prominent "VOIDED / RETURNED" banner with cancellation timestamp and reason.
+- `frontend/src/components/views/BillingView.tsx`: Implemented two-sub-tab POS Billing architecture:
+  - **Sub-Tab 1: New Bill / POS Counter**: The active POS counter for barcode/manual item lookup, automated brand/mechanic discounts, 18% GST calculation, and atomic checkout.
+  - **Sub-Tab 2: Invoices History**: Chronological view of past sales invoices with live search filtering (invoice number, customer name, customer phone), line item and payment badges, and total amounts.
+  - **Invoice Receipt Modal**: One-click modal to inspect full line items, discounts, GST tax, and reprint thermal receipts.
+  - **Modify Invoice Header Modal**: Quick editing dialog enabling cashiers to correct customer name, phone number, and payment method (Cash, UPI, Card, Store Credit) without altering immutable stock movement ledgers.
+- `backend/app/schemas/billing.py`: Added `InvoiceUpdateRequest` schema for modifying invoice headers.
+- `backend/app/services/billing_service.py`: Added `list_invoices()` with search term matching and `update_invoice()` for safe customer/payment metadata modification.
+- `backend/app/api/v1/endpoints/billing.py`: Mounted `GET /api/v1/billing/invoices` and `PUT /api/v1/billing/invoices/{invoice_id}` endpoints.
+- `frontend/src/api/modules/billing.api.ts`: Added `getInvoices()` and `updateInvoice()` API client methods.
+
+### Updated
+- `backend/Dockerfile`: Refactored into a multi-target Dockerfile (`base`, `dev`, `prod`) supporting hot-reload in local development and non-root `appuser` execution (`--workers 1 --proxy-headers`, automatic Alembic migrations) in production.
+- `docker-compose.yml` & `.env.example`: Updated local development Compose setup to use `backend` `target: dev`, aligned `NEXT_PUBLIC_API_URL` build args/env to `http://localhost:8001/api/v1`, added container healthchecks for `frontend` and `backend`, and enabled LAN IP `CORS_ORIGIN_REGEX` for local mobile scanner testing.
+- `backend/app/main.py`: Updated `CORSMiddleware` to consume `settings.cors_origins_list` and `settings.CORS_ORIGIN_REGEX` instead of hardcoded localhost origins.
+- `frontend/src/api/modules/scanner.api.ts` & `frontend/src/components/scanner/MobileScannerModal.tsx`: Updated `getWebSocketUrl()` and pairing QR URL generation to support same-origin reverse proxy paths (`/api/v1`) and HTTPS (`wss://`) in production while retaining local LAN (`:8001`) development behavior.
+- `docs/docker-architecture.md`, `docs/deployment.md`, and `README.md`: Synchronized local and production Docker architecture diagrams, service specs, environment variables, and operational runbooks.
+
+### Fixed
+- `frontend/src/api/modules/scanner.api.ts` & `backend/app/api/v1/endpoints/scanner.py`: Hardened Docker internal IP detector (`isDockerInternalIp` / `is_docker_or_loopback_ip`) to strip port suffixes and exclude any private Docker container bridge subnets (`172.16.x.x` - `172.31.x.x`) and loopback addresses, preventing mobile phone browser timeout errors (`ERR_CONNECTION_TIMED_OUT` on `172.21.0.4:3000`).
+- `frontend/src/context/ScannerContext.tsx`: Automatically sanitizes any legacy `172.x` Docker bridge IPs stored in browser `localStorage`, defaulting immediately to the host computer's physical Wi-Fi IP (`192.168.1.9`).
+- `frontend/src/components/scanner/MobileScannerModal.tsx`: Enforced clean fallback to host PC LAN IP (`192.168.1.9:3000`) for the mobile scanner pairing QR code and scan URL.
+
 ## 2026-11-26
 
 ### Added
+- `backend/app/models/supplier.py`: Added `SupplierBrandDiscount` model with unique constraint `(supplier_id, brand_id)` enabling wholesalers who supply multiple brands (Hero, Honda, Bajaj, TVS) to have custom wholesale purchase discount percentage overrides.
+- `backend/app/models/brand.py`: Added `default_customer_discount` and `default_mechanic_discount` attributes for automated retail and trade selling discount rules.
+- `backend/alembic/versions/b8e4f1a2c3d5_create_supplier_brand_discounts_table.py`: Database migration creating the `supplier_brand_discounts` table with foreign key cascades and adding discount columns to `brands`.
+- `backend/app/schemas/supplier.py` & `backend/app/schemas/brand.py`: Updated Pydantic v2 schemas (`SupplierBrandDiscountCreate`, `SupplierBrandDiscountResponse`, `SupplierCreate`, `SupplierUpdate`, `SupplierResponse`, `BrandBase`, `BrandResponse`).
+- `backend/app/services/supplier_service.py`: Added multi-brand discount management and `get_effective_discount()` lookup method with fallback to supplier base discount.
+- `backend/app/services/inventory_service.py`: Added automatic inference of purchase discount and brand selling discounts upon single-part creation.
+- `backend/app/services/import_service.py`: Upgraded bulk Excel import engine to resolve multi-brand supplier purchase discounts and brand selling discounts in lock-free memory without concurrency or locking issues.
+- `frontend/src/types/index.ts` & `frontend/src/api/modules/suppliers.api.ts` & `frontend/src/api/modules/brands.api.ts`: Updated TypeScript domain contracts and API client adapters.
+- `frontend/src/components/views/SuppliersView.tsx`: Integrated multi-brand discount matrix UI with brand rates chips on supplier cards and dynamic add/remove rows in Add/Edit modals.
+- `frontend/src/components/views/InventoryView.tsx`: Added brand selling discount configuration and inline editing for Retail and Mechanic rates in Item Brands Master modal.
+- `frontend/src/components/views/BillingView.tsx`: Automated POS line-item discounts populated dynamically based on customer type (Retail vs. Mechanic) and brand default selling rates.
 - `backend/app/models/expense.py`: Created `Expense` model and `ExpenseCategory` enum (`RENT`, `ELECTRICITY`, `TEA_REFRESHMENT`, `SALARY_WAGES`, `MAINTENANCE`, `TRANSPORT`, `STATIONERY`, `OTHER`) for shop operating overhead.
 - `backend/alembic/versions/e7c2a1f4b89d_create_expenses_table.py`: Database migration creating the `expenses` table with indexes on `expense_date`.
 - `backend/app/schemas/expense.py`: Pydantic v2 schemas (`ExpenseCreate`, `ExpenseUpdate`, `ExpenseResponse`, `DailyExpenseSummary`).

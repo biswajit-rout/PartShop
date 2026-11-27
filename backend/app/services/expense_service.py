@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from app.models.expense import Expense, ExpenseCategory
-from app.models.sale import Sale
+from app.models.sale import Sale, SaleStatus
 from app.schemas.expense import (
     ExpenseCreate,
     ExpenseUpdate,
@@ -71,7 +71,9 @@ class ExpenseService:
         start_dt = datetime.combine(target_date, time.min).replace(tzinfo=timezone.utc)
         end_dt = datetime.combine(target_date, time.max).replace(tzinfo=timezone.utc)
         sales_stmt = select(func.coalesce(func.sum(Sale.grand_total), Decimal("0.00"))).where(
-            Sale.created_at >= start_dt, Sale.created_at <= end_dt
+            Sale.created_at >= start_dt,
+            Sale.created_at <= end_dt,
+            Sale.status == SaleStatus.COMPLETED,
         )
         sales_res = await self.db.execute(sales_stmt)
         total_sales = sales_res.scalar() or Decimal("0.00")

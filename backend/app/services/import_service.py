@@ -3,10 +3,12 @@ from decimal import Decimal
 import openpyxl
 from fastapi import UploadFile, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.spare_part import SparePart
-from app.models.supplier import Supplier
+from app.models.supplier import Supplier, SupplierBrandDiscount
+from app.models.brand import Brand
 from app.models.stock_movement import StockMovement, StockMovementType
 from app.schemas.imports import ImportSummaryResponse, RowErrorDetail
 
@@ -35,15 +37,32 @@ class ImportService:
                 detail="Invalid file format. Please upload an Excel file ending with .xlsx.",
             )
 
-        # Look up supplier details if supplier_id was passed
+        # Look up supplier details and brand discounts matrix if supplier_id was passed
         supplier_name: str | None = None
         supplier_default_disc: Decimal = Decimal("0.00")
+        supplier_brand_discounts: dict[str, Decimal] = {}
         if supplier_id:
-            supp_res = await self.db.execute(select(Supplier).where(Supplier.id == supplier_id))
+            supp_res = await self.db.execute(
+                select(Supplier)
+                .options(
+                    selectinload(Supplier.brand_discounts).selectinload(SupplierBrandDiscount.brand)
+                )
+                .where(Supplier.id == supplier_id)
+            )
             supplier = supp_res.scalar_one_or_none()
             if supplier:
                 supplier_name = supplier.name
                 supplier_default_disc = supplier.default_discount_percentage
+                for bd in supplier.brand_discounts:
+                    if bd.brand and bd.brand.name:
+                        supplier_brand_discounts[bd.brand.name.strip().lower()] = bd.discount_percentage
+
+        # Pre-cache brand-level default customer and mechanic selling discounts
+        all_brands_res = await self.db.execute(select(Brand))
+        brand_selling_discounts: dict[str, tuple[Decimal, Decimal]] = {
+            b.name.strip().lower(): (b.default_customer_discount, b.default_mechanic_discount)
+            for b in all_brands_res.scalars().all()
+        }
 
         # 2. Read file bytes into memory
         contents = await file.read()
@@ -231,6 +250,7 @@ class ImportService:
                 selling_price = Decimal(str(raw_selling or 0))
 
                 # Determine supplier discount percentage
+                brand_key = brand_name.strip().lower()
                 raw_discount = get_val("discount")
                 if raw_discount is not None and str(raw_discount).strip() != "":
                     val = Decimal(str(raw_discount))
@@ -240,6 +260,10 @@ class ImportService:
                     else:
                         supplier_discount = round(val * Decimal("100.00"), 2)
                         discount_rate = val
+                elif brand_key in supplier_brand_discounts:
+                    # Multi-brand supplier discount matrix match
+                    supplier_discount = supplier_brand_discounts[brand_key]
+                    discount_rate = supplier_discount / Decimal("100.00")
                 elif default_supplier_discount is not None and default_supplier_discount > 0:
                     supplier_discount = round(Decimal(str(default_supplier_discount)), 2)
                     discount_rate = supplier_discount / Decimal("100.00")
@@ -273,6 +297,12 @@ class ImportService:
                 skipped_count += 1
                 continue
 
+            # Resolve default selling discounts from Brand
+            brand_key = brand_name.strip().lower()
+            default_cust_disc, default_mech_disc = brand_selling_discounts.get(
+                brand_key, (Decimal("0.00"), Decimal("0.00"))
+            )
+
             # Instantiate SparePart with mapped supplier attributes
             new_part = SparePart(
                 item_name=item_name,
@@ -288,8 +318,8 @@ class ImportService:
                 rack_number=str(get_val("rack_number", "")).strip() or None,
                 purchase_price=purchase_price,
                 selling_price=selling_price,
-                customer_discount=Decimal("0.00"),
-                mechanic_discount=Decimal("0.00"),
+                customer_discount=default_cust_disc,
+                mechanic_discount=default_mech_disc,
                 barcode=barcode,
             )
 

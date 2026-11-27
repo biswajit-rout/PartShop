@@ -1,22 +1,42 @@
-# 1. Use official lightweight Python 3.12 Linux image
-FROM python:3.12-slim
+# =========================================================================
+# PartShop Backend Dockerfile (Multi-Target: dev & prod)
+# =========================================================================
 
-# 2. Prevent Python from buffering outputs and writing .pyc files
+# -------------------------------------------------------------------------
+# Stage 1: Base dependencies
+# -------------------------------------------------------------------------
+FROM python:3.12-slim AS base
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# 3. Set the working directory inside the container
 WORKDIR /app
 
-# 4. Copy and install dependencies first (Docker layer caching)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 5. Copy the rest of the application code
-COPY . .
-
-# 6. Expose FastAPI port
 EXPOSE 8000
 
-# 7. Start Uvicorn with auto-reload enabled
+# -------------------------------------------------------------------------
+# Stage 2: Local Development Runner (hot-reload via ./backend:/app mount)
+# -------------------------------------------------------------------------
+FROM base AS dev
+
+COPY . .
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+# -------------------------------------------------------------------------
+# Stage 3: Production Runner (non-root, auto-migrations, proxy headers)
+# -------------------------------------------------------------------------
+FROM base AS prod
+
+RUN addgroup --system --gid 1001 appgroup && \
+    adduser --system --uid 1001 --ingroup appgroup appuser
+
+COPY --chown=appuser:appgroup . .
+
+USER appuser
+
+# Single worker preserves in-memory WebSocket scanner session rooms
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips='*'"]

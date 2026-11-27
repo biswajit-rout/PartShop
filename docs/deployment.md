@@ -3,87 +3,93 @@
 > **Document Purpose**: Technical deployment specification, infrastructure topology, CI/CD pipeline design, environment configuration management, and release runbooks.  
 > **Source of Truth**: Active codebase (`d:/Programming/PartShop`)  
 > **Governance**: Maintained according to rules established in `AGENTS.md`.  
-> **Last Updated**: 2026-11-20  
+> **Last Updated**: 2026-11-27  
 
 ---
 
 ## 1. Deployment Philosophy & Architecture Overview
 
-PartShop is designed for reproducible containerized deployments using multi-stage Docker builds and Docker Compose orchestration. The deployment strategy follows a **Twelve-Factor App** methodology:
+PartShop is designed for reproducible containerized deployments using multi-stage/multi-target Docker builds and segregated Compose configurations (`docker-compose.yml` for local development, `docker-compose.prod.yml` + `Caddyfile` for production). The deployment strategy follows a **Twelve-Factor App** methodology:
 
-1. **Immutable Build Artifacts**: The Next.js frontend container contains pre-compiled standalone artifacts (`.next/standalone`). The same image built in CI is promoted across staging and production without re-compilation.
-2. **Environment Parity**: Local development, staging, and production run identical containerized runtime topologies with isolated bridge networks and volume management.
-3. **Decoupled Service Lifecycle**: Frontend, backend, and database services are independently deployable and restartable. Backend integration is deferred via Docker Compose profiles until backend code is committed.
-4. **Zero Secrets in Code**: Environment secrets (`POSTGRES_PASSWORD`, API secrets) are injected strictly at runtime via environment variables or cloud secret managers.
+1. **Environment Segregation**: Local development uses `docker-compose.yml` (`.env`) with hot-reloading (`--reload`) and exposed ports; production uses `docker-compose.prod.yml` (`.env.prod`) with non-root runners, automatic Alembic migrations on startup, and internal-only backend/PostgreSQL ports.
+2. **Same-Origin Edge Reverse Proxy (`Caddyfile`)**: Caddy terminates HTTPS (automatic Let's Encrypt certificates when `SITE_ADDRESS` is a domain) and proxies `/api/*` (including scanner WebSockets), `/health`, and `/docs*` to `backend:8000` while serving UI routes from `frontend:3000`.
+3. **Single-Worker WebSocket Consistency**: The FastAPI production container runs with `--workers 1` so all desktop terminals and mobile phone barcode scanners share the same in-memory `ScannerConnectionManager` room registry.
+4. **Zero Secrets in Code**: Production credentials (`POSTGRES_PASSWORD`, `BACKEND_SECRET_KEY`) are required at runtime via `.env.prod` (Compose fails fast if omitted).
 
 ---
 
 ## 2. Infrastructure Deployment Topology
 
-### Production Single-Node VPS / Cloud VM Architecture
+### Production Single-Node VPS / Shop Host Architecture
 
-In a standard production environment (e.g., Ubuntu 24.04 LTS on AWS EC2, DigitalOcean Droplet, or Hetzner VPS), an edge reverse proxy (Nginx or Caddy) terminates SSL and directs incoming traffic to the container network:
+In production (e.g., Hetzner/DigitalOcean/Oracle VPS or a shop PC behind Cloudflare Tunnel), Caddy terminates SSL/TLS (or accepts HTTP behind Cloudflare Tunnel when `SITE_ADDRESS=:80`) and routes traffic over the internal Docker bridge network:
 
 ```mermaid
 flowchart TD
-    Client["Browser / POS Client"]
+    Client["Desktop POS / Mobile Scanner Browser"]
     DNS["DNS / Cloudflare"]
-    
-    subgraph Host["Production Host (Linux VM / VPS)"]
+
+    subgraph Host["Production Host (Linux VPS / Shop PC)"]
         Firewall["UFW / Security Group<br/>(Ports 80, 443)"]
-        ReverseProxy["Edge Reverse Proxy<br/>(Caddy / Nginx + Let's Encrypt)"]
-        
+
         subgraph DockerNetwork["partshop-network (Internal Bridge)"]
-            Frontend["partshop-frontend<br/>Node 20 Standalone (Port 3000)"]
-            Backend["partshop-backend (Planned)<br/>FastAPI / Uvicorn (Port 8000)"]
-            Postgres["partshop-postgres<br/>PostgreSQL 16 (Port 5432)"]
+            Caddy["partshop-caddy<br/>Caddy 2 Alpine (:80, :443 + Auto-TLS)"]
+            Frontend["partshop-frontend<br/>Node 20 Standalone (expose :3000)"]
+            Backend["partshop-backend<br/>FastAPI Non-Root Uvicorn --workers 1 (expose :8000)"]
+            Postgres["partshop-postgres<br/>PostgreSQL 16 Alpine (expose :5432)"]
         end
-        
-        Storage[("Persistent Docker Volume<br/>partshop-pgdata")]
+
+        PGStorage[("Volume: partshop-pgdata")]
+        CaddyStorage[("Volumes: partshop-caddy-data & config")]
     end
 
-    Client -->|HTTPS :443| DNS
+    Client -->|HTTPS / WSS :443| DNS
     DNS --> Firewall
-    Firewall --> ReverseProxy
-    
-    ReverseProxy -->|Route / & /_next/*| Frontend
-    ReverseProxy -.->|Route /api/v1/* (Planned)| Backend
-    Backend -.->|TCP :5432| Postgres
-    Postgres <--> Storage
+    Firewall --> Caddy
+
+    Caddy -->|"/* (UI)"| Frontend
+    Caddy -->|"/api/*, /health, /docs*"| Backend
+    Backend -->|Async TCP :5432| Postgres
+    Postgres <--> PGStorage
+    Caddy <--> CaddyStorage
 
     classDef edge fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
     classDef container fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#cbd5e1;
     classDef storage fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ecfdf5;
-    
-    class ReverseProxy,Firewall edge;
-    class Frontend,Postgres container;
-    class Storage storage;
+
+    class Caddy,Firewall edge;
+    class Frontend,Backend,Postgres container;
+    class PGStorage,CaddyStorage storage;
 ```
 
 ---
 
 ## 3. Environment Configuration Management
 
-The system utilizes environment files strictly segregated by tier. Never commit `.env` or production secrets to version control.
+PartShop separates environment templates into `.env.example` (local development) and `.env.prod.example` (production). Never commit `.env` or `.env.prod` to version control.
 
-| Variable Name | Required By | Default / Local Development | Staging / Production | Description |
+### Production Environment Variables (`.env.prod`)
+
+| Variable Name | Required By | Default in `.env.prod.example` | Production Notes | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `NODE_ENV` | Frontend | `production` | `production` | Next.js optimization mode in container |
-| `PORT` | Frontend | `3000` | `3000` | Internal listening port |
-| `HOSTNAME` | Frontend | `0.0.0.0` | `0.0.0.0` | Docker interface binding address |
-| `NEXT_PUBLIC_APP_URL` | Frontend | `http://localhost:3000` | `https://pos.yourdomain.com` | Public origin of the application |
-| `NEXT_PUBLIC_API_URL` | Frontend | `http://localhost:8000/api/v1` | `https://api.yourdomain.com/api/v1` | Public or internal API gateway endpoint |
-| `POSTGRES_DB` | Postgres / Backend | `partshop_db` | `partshop_prod_db` | Database catalog name |
-| `POSTGRES_USER` | Postgres / Backend | `partshop_user` | Strong service account | Database superuser/owner |
-| `POSTGRES_PASSWORD` | Postgres / Backend | `partshop_dev_pass_2026` | Cryptographically random string | PostgreSQL authentication secret |
-| `POSTGRES_PORT` | Postgres / Host | `5432` | `5432` (or bound only to 127.0.0.1) | Host database port |
-| `DATABASE_URL` | Backend | `postgresql+asyncpg://...` | Production database connection string | Async database connection pool URI |
+| `SITE_ADDRESS` | Caddy | `:80` | `pos.yourdomain.com` | Domain name for auto-HTTPS, or `:80` behind Cloudflare Tunnel / local testing |
+| `HTTP_PORT` | Caddy | `80` | `80` | Host HTTP port |
+| `HTTPS_PORT` | Caddy | `443` | `443` | Host HTTPS port |
+| `NEXT_PUBLIC_API_URL` | Frontend | `/api/v1` | `/api/v1` | Same-origin API & WebSocket base path (inlined at image build time) |
+| `FRONTEND_IMAGE` | Compose | `partshop-frontend:latest` | `ghcr.io/<org>/partshop/frontend:latest` | Optional prebuilt registry image |
+| `BACKEND_IMAGE` | Compose | `partshop-backend:latest` | `ghcr.io/<org>/partshop/backend:latest` | Optional prebuilt registry image |
+| `POSTGRES_USER` | Postgres / Backend | `partshop_prod_user` | Strong service user | Required database user (Compose fails fast if unset) |
+| `POSTGRES_PASSWORD` | Postgres / Backend | Placeholder | Cryptographically random string | Required PostgreSQL secret |
+| `POSTGRES_DB` | Postgres / Backend | `partshop_prod_db` | `partshop_prod_db` | Required PostgreSQL catalog |
+| `BACKEND_SECRET_KEY` | Backend | Placeholder | `openssl rand -hex 32` | Required JWT signing secret |
+| `CORS_ORIGINS` | Backend | `https://pos.yourdomain.com,http://localhost` | Comma-separated origins | Allowed browser origins |
+| `CORS_ORIGIN_REGEX` | Backend | Empty | Optional regex | Regex for dynamic origins (used in local LAN dev) |
 
 ---
 
 ## 4. CI/CD Release Pipeline
 
-The release pipeline follows continuous integration with automated testing and container image tagging:
+For low-RAM VPS instances (e.g., 1 GB RAM), building Docker images in GitHub Actions and pulling them onto the server avoids out-of-memory errors during `npm run build`:
 
 ```mermaid
 sequenceDiagram
@@ -91,18 +97,17 @@ sequenceDiagram
     actor Developer
     participant Git as GitHub Repository
     participant CI as GitHub Actions Runner
-    participant Registry as Container Registry (GHCR / ECR)
-    participant Server as Production Host / Cluster
+    participant Registry as Container Registry (GHCR)
+    participant Server as Production Host (VPS)
 
     Developer->>Git: Push commit to main branch
     Git->>CI: Trigger Build & Release Workflow
-    CI->>CI: Run Linters & Standalone Build Check
-    CI->>CI: Build Multi-Stage Docker Image
-    CI->>Registry: Authenticate and Push partshop-frontend:sha-xxxx & :latest
-    CI->>Server: Dispatch SSH Deployment Webhook / SSH Deploy Action
-    Server->>Registry: Pull updated image (:latest)
-    Server->>Server: docker compose up -d --no-deps frontend
-    Server->>Server: Verify Healthcheck (/api/health or HTTP 200)
+    CI->>CI: Build Frontend (NEXT_PUBLIC_API_URL=/api/v1) & Backend (target: prod)
+    CI->>Registry: Push frontend:latest & backend:latest
+    CI->>Server: SSH Deploy Action
+    Server->>Registry: docker compose -f docker-compose.prod.yml --env-file .env.prod pull
+    Server->>Server: docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+    Server->>Server: Verify Healthcheck (GET /health)
     Server-->>CI: Deployment Succeeded
 ```
 
@@ -137,10 +142,25 @@ jobs:
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
+          build-args: |
+            NEXT_PUBLIC_API_URL=/api/v1
           push: true
           tags: |
             ghcr.io/${{ github.repository }}/frontend:latest
             ghcr.io/${{ github.repository }}/frontend:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & Push Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          target: prod
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/backend:latest
+            ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -152,8 +172,8 @@ jobs:
           key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           script: |
             cd /opt/partshop
-            docker compose pull frontend
-            docker compose up -d --no-deps frontend
+            docker compose -f docker-compose.prod.yml --env-file .env.prod pull
+            docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
             docker image prune -f
 ```
 
@@ -163,65 +183,49 @@ jobs:
 
 ### Prerequisites on Production Host
 - Ubuntu 22.04 / 24.04 LTS (or Debian 12)
-- Docker Engine >= 26.0 & Docker Compose v2 (plugin)
+- Docker Engine >= 26.0 & Docker Compose v2 plugin
 - UFW firewall enabled (`ufw allow 22`, `ufw allow 80`, `ufw allow 443`)
-- Reverse proxy (Nginx or Caddy) installed on host or in an ingress container
 
 ### Step 1: Initial Server Provisioning
 ```bash
-# Clone deployment repository
 sudo git clone https://github.com/your-org/partshop.git /opt/partshop
 cd /opt/partshop
 
 # Create production environment file from template
-sudo cp .env.example .env
-sudo nano .env # Insert strong production credentials and production URLs
+sudo cp .env.prod.example .env.prod
+sudo nano .env.prod
+# Set SITE_ADDRESS=pos.yourdomain.com, CORS_ORIGINS=https://pos.yourdomain.com,
+# strong POSTGRES_PASSWORD, and BACKEND_SECRET_KEY (openssl rand -hex 32)
 ```
 
-### Step 2: Launch Production Services
+### Step 2: Launch Production Stack
 ```bash
-# Launch current production stack (Frontend + PostgreSQL database)
-docker compose up -d --build
+# Build & launch Caddy + Frontend + Backend (runs alembic upgrade head) + PostgreSQL
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 
-# Inspect running containers
-docker compose ps
+# Inspect running containers and health checks
+docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 ```
 
-### Step 3: Configure Reverse Proxy (Caddy Example)
-Create `/etc/caddy/Caddyfile`:
-```caddy
-pos.yourdomain.com {
-    reverse_proxy 127.0.0.1:3000
-    encode gzip zstd
-}
+### Step 3: Verify Endpoints & Mobile Scanner HTTPS
+- Open `https://pos.yourdomain.com` (or `http://localhost` if testing locally with `SITE_ADDRESS=:80`).
+- Verify API health: `curl -I https://pos.yourdomain.com/health`
+- Because Caddy serves both the UI and `/api/v1/scanner/ws/*` over HTTPS (`wss://`), smartphone camera scanning (`@zxing/browser`) works out of the box.
 
-api.yourdomain.com {
-    reverse_proxy 127.0.0.1:8000
-    encode gzip zstd
-}
-```
-Reload Caddy:
-```bash
-sudo systemctl reload caddy
-```
+*(Note: If running on a shop PC without a public IP, leave `SITE_ADDRESS=:80` and point a free Cloudflare Tunnel at `http://localhost:80`.)*
 
 ---
 
-## 6. Zero-Downtime Rollout & Update Procedures
-
-To update the running application without downtime:
+## 6. Update & Rollout Procedures
 
 ```bash
-# 1. Pull latest codebase updates
+cd /opt/partshop
 git pull origin main
 
-# 2. Build the updated frontend container
-docker compose build frontend
+# Rebuild and recreate updated app containers without touching Postgres or Caddy certs
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build frontend backend
 
-# 3. Recreate the frontend container with zero downtime
-docker compose up -d --no-deps frontend
-
-# 4. Clean dangling builder layers
+# Clean dangling builder layers
 docker image prune -f
 ```
 
@@ -241,9 +245,10 @@ FILENAME="partshop_db_${TIMESTAMP}.sql.gz"
 
 mkdir -p "$BACKUP_DIR"
 
-# Execute pg_dump within the running postgres container
-docker compose -f /opt/partshop/docker-compose.yml exec -T postgres \
-  pg_dump -U partshop_user partshop_db | gzip > "$BACKUP_DIR/$FILENAME"
+# Execute pg_dump using the configured production credentials
+source /opt/partshop/.env.prod
+docker compose -f /opt/partshop/docker-compose.prod.yml --env-file /opt/partshop/.env.prod \
+  exec -T postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip > "$BACKUP_DIR/$FILENAME"
 
 # Delete backups older than 14 days
 find "$BACKUP_DIR" -type f -name "*.sql.gz" -mtime +14 -delete
@@ -258,30 +263,19 @@ Configure daily cron job (`crontab -e`):
 
 ### Database Restoration Procedure
 ```bash
-# Uncompress and restore database dump
+source /opt/partshop/.env.prod
 gunzip < /opt/partshop/backups/partshop_db_YYYYMMDD_HHMMSS.sql.gz | \
-  docker compose exec -T postgres psql -U partshop_user -d partshop_db
+  docker compose -f /opt/partshop/docker-compose.prod.yml --env-file /opt/partshop/.env.prod \
+  exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 ```
 
 ---
 
 ## 8. Rollback Procedure
 
-If a deployed frontend version exhibits critical regressions:
-
-1. Identify the previous stable image or git commit:
-   ```bash
-   git log --oneline -n 5
-   ```
-2. Check out the known good release tag:
-   ```bash
-   git checkout tags/v1.0.0
-   ```
-3. Rebuild and restart the container:
-   ```bash
-   docker compose up -d --build --no-deps frontend
-   ```
-4. Verify HTTP responsiveness:
-   ```bash
-   curl -I http://localhost:3000
-   ```
+```bash
+git log --oneline -n 5
+git checkout tags/v1.0.0
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build --no-deps frontend backend
+curl -I http://localhost/health
+```

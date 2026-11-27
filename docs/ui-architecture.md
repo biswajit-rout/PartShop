@@ -350,16 +350,21 @@ The seven domain views in `src/components/views/` correspond directly to the fun
 - **Rack Location Indexing**: High-visibility pill badges displaying warehouse rack bins (e.g. `RACK-A-01`).
 
 ### 7.3 POS & Billing Module (`BillingView.tsx`)
-- **Customer & Payment Meta**: Input fields for customer name and payment type (`Cash`, `UPI`, `Card`, `Credit / Khata`).
-- **Mechanic Partner Attribution**: Dropdown selection associating bills with mechanic partners to auto-calculate commission percentages.
-- **Barcode Rapid Add**: Form listener supporting hardware USB/Bluetooth barcode scanners. Matches against EAN-13 barcodes or alphanumeric part numbers.
-- **Line Items Grid**: Interactive row items with quantity steppers, percentage discount overrides, line subtotal calculations, and item deletion.
-- **GST & Summary Ledger**: Real-time financial calculations:
-  - Taxable Value (Subtotal)
-  - Integrated GST (18% automotive standard)
-  - Commission deduction for assigned mechanic
-  - Grand Total formatted in Indian numbering (`₹`)
-- **Hardware Integration**: Trigger for thermal printer invocation (`window.print()`) with print-media style isolation.
+Features a 2-sub-tab architecture:
+1. **New Bill / POS Counter Sub-Tab**:
+   - **Customer & Payment Meta**: Input fields for customer name and payment type (`Cash`, `UPI`, `Card`, `Credit / Khata`).
+   - **Mechanic Partner Attribution**: Dropdown selection associating bills with mechanic partners to auto-calculate commission percentages.
+   - **Barcode Rapid Add**: Form listener supporting hardware USB/Bluetooth barcode scanners. Matches against EAN-13 barcodes or alphanumeric part numbers.
+   - **Line Items Grid**: Interactive row items with quantity steppers, percentage discount overrides, line subtotal calculations, and item deletion.
+   - **GST & Summary Ledger**: Real-time financial calculations (Taxable Subtotal, 18% GST, Mechanic Commission, Grand Total in `₹`).
+   - **Hardware Integration**: Trigger for thermal printer invocation (`window.print()`).
+2. **Invoices History Sub-Tab**:
+   - **Invoice Directory**: Chronological listing of past counter sales invoices with keyword search (by invoice #, customer name, phone).
+   - **Date Range Filters**: Temporal preset buttons ("All Time", "Today", "This Week", "This Month", "Custom Range") and datetime range pickers.
+   - **Status Tabs**: Quick filtering across `All Invoices`, `🟢 Active (Completed)`, and `🔴 Voided / Returned`.
+   - **Receipt Inspector & Reprint**: One-click modal to inspect line items, discounts, taxes, and reprint thermal receipts (displaying a prominent VOID watermark when applicable).
+   - **Modify Invoice & Items Modal**: Comprehensive editing modal allowing cashiers to correct customer typos, change payment methods, adjust quantities with +/- steppers, edit line-item discounts, remove individual items, or search and add new parts to an existing invoice, with real-time total recalculations and automated inventory stock level adjustments.
+   - **Return Items & Void Modal**: Dedicated modal displaying the items that will be returned to inventory, capturing an audit reason, and executing `POST /billing/invoices/{invoice_id}/cancel`.
 
 ### 7.4 Supplier Module (`SuppliersView.tsx`)
 - **Directory Grid**: Cards detailing wholesale distributor credentials.

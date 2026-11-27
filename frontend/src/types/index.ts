@@ -37,7 +37,17 @@ export interface Brand {
   name: string;
   code?: string;
   description?: string;
+  defaultCustomerDiscount?: number;
+  defaultMechanicDiscount?: number;
   createdAt?: string;
+}
+
+export interface SupplierBrandDiscount {
+  id?: number;
+  supplierId?: number;
+  brandId: number;
+  brandName?: string;
+  discountPercentage: number;
 }
 
 export interface Supplier {
@@ -54,6 +64,7 @@ export interface Supplier {
   totalPurchases?: number;
   totalPartsCount?: number;
   isActive?: boolean;
+  brandDiscounts?: SupplierBrandDiscount[];
   createdAt?: string;
   updatedAt?: string;
 }

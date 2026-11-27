@@ -6,6 +6,8 @@ export interface BackendBrand {
   name: string;
   code?: string | null;
   description?: string | null;
+  default_customer_discount?: string | number;
+  default_mechanic_discount?: string | number;
   created_at: string;
   updated_at: string;
 }
@@ -16,6 +18,8 @@ export function mapBackendBrandToFrontend(b: BackendBrand): Brand {
     name: b.name,
     code: b.code || "",
     description: b.description || "",
+    defaultCustomerDiscount: Number(b.default_customer_discount || 0),
+    defaultMechanicDiscount: Number(b.default_mechanic_discount || 0),
     createdAt: b.created_at,
   };
 }
@@ -28,7 +32,13 @@ export const brandsApi = {
     return (data || []).map(mapBackendBrandToFrontend);
   },
 
-  async create(payload: { name: string; code?: string; description?: string }): Promise<Brand> {
+  async create(payload: {
+    name: string;
+    code?: string;
+    description?: string;
+    default_customer_discount?: number;
+    default_mechanic_discount?: number;
+  }): Promise<Brand> {
     const data = await apiClient<BackendBrand>("/brands", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -36,7 +46,16 @@ export const brandsApi = {
     return mapBackendBrandToFrontend(data);
   },
 
-  async update(id: number, payload: { name?: string; code?: string; description?: string }): Promise<Brand> {
+  async update(
+    id: number,
+    payload: {
+      name?: string;
+      code?: string;
+      description?: string;
+      default_customer_discount?: number;
+      default_mechanic_discount?: number;
+    }
+  ): Promise<Brand> {
     const data = await apiClient<BackendBrand>(`/brands/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),

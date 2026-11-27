@@ -248,10 +248,15 @@ Manage multi-brand wholesale distributor partnerships, supplier-provided purchas
 - `created_at` / `updated_at`: Audit timestamps
 
 ### Item Mapping & Purchase Discount Mechanics
+- **Multi-Brand Supplier Discount Matrix**: Wholesalers supplying multiple brands (e.g. Hero, Honda, Bajaj, TVS) can have custom, brand-specific wholesale purchase discounts configured (e.g. Sri Ganesh Spares: Hero 22%, Honda 18%, Bajaj 25%, TVS 20%). A default rate serves as fallback for unconfigured brands.
 - **Brand & Supplier Separation**: Different brands can be purchased from different suppliers (e.g., *Honda Genuine Spares* from *Kalyani Honda Distributorship* at 14.5% discount; *Bajaj* and *Endurance* from *Om Sai Auto Spares* at 18% discount).
-- **Excel Spreadsheet Import under Supplier**: Cashiers or store managers can select a specific supplier when uploading an Excel workbook (.xlsx). The engine automatically tags every imported part with `supplier_id`, `supplier_name`, and computes the purchase cost based on the supplier's wholesale discount rate (or spreadsheet line-item discount).
+- **Concurrency-Safe Atomic Bulk Import**: When uploading an Excel catalog (.xlsx) or receiving a shipment, the engine deterministically checks each item's brand against the supplier's discount matrix in lock-free memory, auto-populates `supplier_discount`, and computes purchase acquisition cost ($\text{MRP} \times (1 - \text{Discount} / 100)$) inside an atomic transaction (`BEGIN ... COMMIT`).
+- **Brand-Wise Customer Selling Discounts at POS Counter**: Brands define default retail customer discounts (e.g. Hero Genuine 5%, generic aftermarket 10%, lubricants 0%). When cashier scans or adds an item to a bill, the line-item discount automatically populates from the brand rate (or mechanic rate if assigned), preventing manual entry delays.
+- **Two-Sub-Tab POS Billing Architecture**:
+  1. **New Bill / POS Counter**: Fast barcode/manual counter billing, customer attribution, mechanic referral commission calculation, real-time 18% GST calculation, row-level locking atomic checkout, and instant stock deduction.
+  2. **Invoices History & Bill Modification**: Store staff can switch to the Invoices History tab to view all past invoices with chronological sorting, live search filtering (by invoice number, customer name, customer phone), view and reprint thermal receipts, and modify bill header fields (customer name, customer phone, payment channel) directly to fix clerical typos without disrupting immutable stock audit ledgers.
 - **Manual Item Creation / Editing**: Inventory creation and edit modals allow selecting the supplier and specifying the exact purchase discount rate.
-- **Supplier Directory & Supplied Parts View**: In the Suppliers view, each supplier displays their live mapped item count. Cashiers can open any supplier to inspect all parts provided by that supplier (OEM SKU, description, brand, compatible bikes, purchase discount %, purchase price, selling price, and stock quantity).
+- **Supplier Directory & Supplied Parts View**: In the Suppliers view, each supplier displays their live mapped item count and brand discount badges. Cashiers can open any supplier to inspect all parts provided by that supplier (OEM SKU, description, brand, compatible bikes, purchase discount %, purchase price, selling price, and stock quantity).
 - **Inventory Cross-Filtering**: The main inventory table displays the supplier name and discount percentage for every item, and includes a live Supplier filter dropdown alongside Brand and Stock Status.
 
 ---
@@ -535,6 +540,32 @@ Provides rapid spare part discovery directly from the persistent top navigation 
 Enables cashiers and store managers to securely terminate their session:
 - **Accessible Logout Controls**: Dedicated "Log Out" button with red accenting positioned in both the global top header and the left navigation sidebar.
 - **Token Invalidation**: Clears stored JWT credentials from local storage and redirects immediately to the login view.
+
+---
+
+## Invoice Management, Cancellation & Historical Audit
+
+Enables cashiers and store owners to review past bills, filter by date ranges, and cancel/void invoices when customers return parts:
+
+### 1. Invoices History & Date Range Filtering
+- **Temporal Filter Presets**: Quick-filtering presets ("All Time", "Today", "This Week", "This Month", "Custom Range") with datetime picker controls.
+- **Status Filtering**: Multi-state filtering between `All Invoices`, `🟢 Active (Completed)`, and `🔴 Voided / Returned`.
+- **Search Capabilities**: Free-text filtering across invoice numbers, customer names, phone numbers, and mechanic names.
+
+### 2. Invoice Cancellation / Void Lifecycle (Customer Returns)
+- **Pessimistic Row Locking**: Uses `with_for_update()` to prevent race conditions during inventory reversal.
+- **Automatic Stock Restoration**: When an invoice is cancelled/voided, all purchased items are atomically incremented back into available inventory.
+- **Stock Movement Audit Trail**: Creates immutable `RETURN_IN` stock movements referencing `SALE_VOID` with the cancellation audit reason.
+- **Exclusion from Financial Summaries**: Voided invoices are excluded from Today's Sales, Daily Net Profit, Top Selling Parts, and Mechanic Commission reports.
+- **Invoice Re-print Void Banner**: Voided receipts clearly stamp "VOIDED / RETURNED" watermark to prevent fraudulent physical returns.
+
+### 3. Invoice Line-Item Editing & Stock Differential Adjustments
+- **Line Item Modification**: Allows cashiers to adjust quantities of items on existing completed invoices, add newly purchased parts, or remove returned/erroneous items.
+- **Atomic Inventory Synchronization**:
+  - Quantity reductions or item removals automatically increment available stock and log `RETURN_IN` (`reference_type="SALE_EDIT"`).
+  - Quantity increases or new items check physical stock availability, decrement inventory, and log `SALE_OUT` (`reference_type="SALE_EDIT"`).
+- **Financial & Tax Recalculation**: Subtotal, line discounts, 18% GST tax liability, grand total, and mechanic referral commissions are recalculated dynamically.
+- **Safety Invariants**: Invoices must contain at least 1 item; completely emptied bills prompt cashiers to use the Return / Void workflow. Voided bills strictly reject edits.
 
 ---
 

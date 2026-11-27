@@ -146,13 +146,19 @@ This tracker tracks our step-by-step progress. Each milestone builds directly on
 ### Milestone 5: Atomic POS Billing Engine
 - **Goal**: Build the core financial transaction engine of the spare parts shop.
 - **Files**:
-  - `backend/app/models/sale.py`: Sales invoice, sale line items, and payment modes.
-  - `backend/app/models/stock_movement.py`: Immutable audit ledger for every stock change.
-  - `backend/app/services/billing_service.py`: Atomic checkout transaction with row-level locks.
-  - `backend/app/api/v1/endpoints/billing.py`: POS checkout endpoint.
+  - `backend/app/models/sale.py`: Sales invoice, sale line items, payment modes, and `SaleStatus` (`COMPLETED`, `VOIDED`).
+  - `backend/app/models/stock_movement.py`: Immutable audit ledger for every stock change (`OUT`, `IN`, `RETURN_IN`, `ADJUSTMENT`).
+  - `backend/app/services/billing_service.py`: Atomic checkout transaction with row-level locks, date-range/status invoice querying (`list_invoices`), full invoice and line-item editing with automatic inventory synchronization (`update_invoice`), and atomic cancellation/voiding with inventory return reversal (`cancel_invoice`).
+  - `backend/app/api/v1/endpoints/billing.py`: POS checkout endpoint, invoice listing with date/status filters, line item & header updates via `PUT /billing/invoices/{invoice_id}`, and `POST /billing/invoices/{invoice_id}/cancel`.
 - **What you'll learn**:
-  - What ACID transactions are and why row-level locking (`SELECT FOR UPDATE`) prevents race conditions.
+  - What ACID transactions are and why row-level locking (`SELECT FOR UPDATE`) prevents race conditions during checkout, item edits, and return reversals.
   - How to calculate GST (CGST/SGST) and mechanic commissions dynamically.
+  - How `update_invoice` compares previous vs new item quantities under pessimistic row locks:
+    - Increments inventory and logs `RETURN_IN` (`SALE_EDIT`) when quantities are reduced or items are deleted.
+    - Validates availability, decrements inventory, and logs `SALE_OUT` (`SALE_EDIT`) when quantities are increased or items added.
+    - Cascades `delete-orphan` line items and refreshes session cache (`expire_all()`).
+  - How to reverse sales via `cancel_invoice`: lock spare parts, increment stock, create `RETURN_IN` stock movements, mark `Sale.status = VOIDED`, and record cancellation audit reasons.
+  - How downstream financial reports (daily sales, expenses profit calculation, top selling parts, mechanic commissions) exclude `VOIDED` records.
 
 ### Milestone 6: Excel Bulk Import & Reports
 - **Goal**: Provide shop owners with easy bulk data onboarding and business insights.
@@ -288,3 +294,49 @@ flowchart LR
 - **Service**: `app/services/expense_service.py` (`ExpenseService` calculating `DailyExpenseSummary` with `total_expense`, category breakdown, `total_sales`, and `estimated_profit`).
 - **Endpoints**: `app/api/v1/endpoints/expenses.py` (`POST /api/v1/expenses`, `GET /api/v1/expenses`, `GET /api/v1/expenses/daily-summary`, `DELETE /api/v1/expenses/{id}`).
 - **Permissions**: `GET /api/v1/reports/daily-sales` and `GET /api/v1/reports/weekly-trend` granted to `ADMIN`, `STORE_MANAGER`, and `COUNTER_STAFF` to enable live counter dashboard updates on bill settlement.
+
+---
+
+## 12. Multi-Brand Supplier Discount Matrix & Brand Selling Engine
+
+### 12.1 Normalized Brand Discount Matrix Architecture
+To support wholesalers who supply multiple brands at different discount rates (e.g. Hero at 22%, Honda at 18%, Bajaj at 25%), the architecture utilizes a normalized relational bridge table:
+
+```mermaid
+flowchart TD
+    subgraph Wholesaler["Supplier Management"]
+        S["Supplier (suppliers)<br/>name, phone, default_discount_percentage"]
+        SBD["SupplierBrandDiscount (supplier_brand_discounts)<br/>supplier_id, brand_id, discount_percentage"]
+    end
+
+    subgraph BrandCatalog["Brand Master"]
+        B["Brand (brands)<br/>name, default_customer_discount, default_mechanic_discount"]
+    end
+
+    subgraph InwardEngine["Inward & Bulk Import Engine"]
+        Import["ImportService.import_parts_from_excel()"]
+        Inventory["InventoryService.create_part()"]
+        Calc["Auto Inward Calc:<br/>Purchase Cost = MRP × (1 - Brand Discount %)"]
+    end
+
+    subgraph OutwardEngine["POS Billing Engine"]
+        BillRow["BillingView.handleAddItemByPart()"]
+        AutoDisc["Auto Discount Application:<br/>• Retail: Brand.default_customer_discount<br/>• Mechanic: MechanicBrandCommission"]
+    end
+
+    S -->|has many| SBD
+    B -->|referenced by| SBD
+    SBD --> InwardEngine
+    InwardEngine --> Calc
+    B --> OutwardEngine
+    OutwardEngine --> AutoDisc
+```
+
+### 12.2 Key Components
+- **Models**:
+  - `app/models/supplier.py`: `SupplierBrandDiscount` with composite unique constraint `(supplier_id, brand_id)`.
+  - `app/models/brand.py`: `default_customer_discount` and `default_mechanic_discount` attributes.
+- **Service Logic**:
+  - `SupplierService.get_effective_discount()`: Evaluates supplier brand matrix with fallback to supplier base discount.
+  - `ImportService.import_parts_from_excel()`: Pre-caches supplier discount matrix and brand default discounts in lock-free memory, auto-computing dealer cost and default customer discounts per row without database locking.
+  - `InventoryService.create_part()`: Automatically infers purchase discount and selling discounts during single-part entry.

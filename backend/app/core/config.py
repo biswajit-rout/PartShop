@@ -14,6 +14,12 @@ class Settings(BaseSettings):
 
     # Server Settings
     PORT: int = 8000
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+    CORS_ORIGIN_REGEX: str = ""
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
     # Database Configuration (matches our PostgreSQL container)
     POSTGRES_USER: str = "partshop_user"

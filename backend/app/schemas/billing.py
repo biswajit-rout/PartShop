@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 from pydantic import BaseModel, ConfigDict
-from app.models.sale import PaymentMethod
+from app.models.sale import PaymentMethod, SaleStatus
 
 
 # 1. Single Item in Customer's Shopping Cart
@@ -48,7 +48,24 @@ class InvoiceResponse(BaseModel):
     tax_amount: Decimal  # GST
     grand_total: Decimal
     payment_method: PaymentMethod
+    status: SaleStatus = SaleStatus.COMPLETED
+    cancellation_reason: str | None = None
+    cancelled_at: datetime | None = None
     created_at: datetime
     items: list[SaleItemResponse]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# 5. Payload to modify invoice details (customer details, payment method, mechanic, or line items)
+class InvoiceUpdateRequest(BaseModel):
+    customer_name: str | None = None
+    customer_phone: str | None = None
+    payment_method: PaymentMethod | None = None
+    mechanic_id: int | None = None
+    items: list[CartItemInput] | None = None
+
+
+# 6. Payload to void / cancel an existing invoice and return items to inventory
+class InvoiceCancelRequest(BaseModel):
+    reason: str | None = None

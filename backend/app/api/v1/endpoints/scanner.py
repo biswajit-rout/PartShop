@@ -13,7 +13,8 @@ def is_docker_or_loopback_ip(ip: str) -> bool:
     """Checks if an IP address belongs to Docker bridge subnets (172.16-31.x.x) or loopback."""
     if not ip or ip.startswith("127.") or ip == "localhost":
         return True
-    parts = ip.split(".")
+    clean_ip = ip.split(":")[0].strip()
+    parts = clean_ip.split(".")
     if len(parts) == 4 and parts[0] == "172":
         try:
             second_octet = int(parts[1])

@@ -320,6 +320,90 @@ Fetches complete invoice details, tax breakdown, and all line items for display 
 
 ---
 
+### 4.3 List Past Invoices
+Retrieves a paginated list of all customer sales invoices sorted descending by creation time, with optional search term filtering, date range filtering, and status filtering.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/billing/invoices`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Query Parameters**:
+  - `skip` (integer, optional, default: `0`): Pagination offset.
+  - `limit` (integer, optional, default: `50`): Maximum records to return.
+  - `search` (string, optional): Search term matching invoice number, customer name, or customer phone.
+  - `start_date` (date string `YYYY-MM-DD`, optional): Filter invoices created on or after this date.
+  - `end_date` (date string `YYYY-MM-DD`, optional): Filter invoices created on or before this date.
+  - `status` (string, optional): One of `COMPLETED`, `VOIDED`.
+- **Response (`200 OK`)**: Array of `InvoiceResponse` objects.
+- **Error Codes**:
+  - `401 Unauthorized`: Missing or invalid JWT token.
+
+---
+
+### 4.4 Modify Past Invoice Header Details
+Allows store managers and counter staff to correct errors on an existing invoice header (such as spelling errors in customer name, incorrect phone number, or updating the payment channel) without disturbing inventory stock audit ledgers. Voided/cancelled invoices cannot be modified.
+
+- **Method**: `PUT`
+- **Route**: `/api/v1/billing/invoices/{invoice_id}`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Path Parameters**:
+  - `invoice_id` (integer, required): Unique identifier of the invoice.
+- **Request Body (`InvoiceUpdateRequest`)**:
+  ```json
+  {
+    "customer_name": "Ramesh Kumar Gupta",
+    "customer_phone": "9876543210",
+    "payment_method": "UPI",
+    "items": [
+      {
+        "spare_part_id": 76,
+        "quantity": 2,
+        "discount_percent": 5.0
+      }
+    ]
+  }
+  ```
+- **Validation & Inventory Rules**:
+  - All fields are optional.
+  - `payment_method`: One of `CASH`, `CARD`, `UPI`, `CREDIT`.
+  - `items`: If provided, must contain at least 1 item.
+  - Automatically compares new item quantities against existing invoice items:
+    - **Quantity increased / New item added**: Locks part row under `SELECT ... FOR UPDATE`, checks stock sufficiency, decrements inventory, and logs `StockMovementType.SALE_OUT` (`reference_type="SALE_EDIT"`).
+    - **Quantity reduced / Item removed**: Locks part row under `SELECT ... FOR UPDATE`, increments inventory, and logs `StockMovementType.RETURN_IN` (`reference_type="SALE_EDIT"`).
+  - Dynamically recalculates subtotal, discounts, 18% GST tax, grand total, and mechanic commission rates.
+- **Response (`200 OK`)**: Updated `InvoiceResponse` object with refreshed line items, tax, and totals.
+- **Error Codes**:
+  - `400 Bad Request`: Cannot modify voided invoices, empty items array, or insufficient inventory stock.
+  - `404 Not Found`: Invoice ID or spare part ID not found.
+  - `401 Unauthorized`: Missing or invalid JWT token.
+
+---
+
+### 4.5 Void / Cancel Invoice (Customer Item Return)
+Voids an existing counter invoice and handles customer returns:
+- Automatically restores physical inventory stock quantities under database row locks (`SELECT ... FOR UPDATE`).
+- Records immutable `RETURN_IN` audit ledger entries in `stock_movements` linked to the invoice ID.
+- Sets invoice status to `VOIDED` with an optional cancellation reason and audit timestamp.
+- Excludes voided invoice totals from today's sales, daily profit, rolling weekly trend, and mechanic commission calculations.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/billing/invoices/{invoice_id}/cancel`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Path Parameters**:
+  - `invoice_id` (integer, required): Unique identifier of the invoice to void.
+- **Request Body (`InvoiceCancelRequest`)**:
+  ```json
+  {
+    "reason": "Customer returned defective clutch cable"
+  }
+  ```
+- **Response (`200 OK`)**: Updated `InvoiceResponse` object with `status: "VOIDED"`.
+- **Error Codes**:
+  - `400 Bad Request`: Invoice is already voided / cancelled.
+  - `404 Not Found`: Invoice ID not found.
+  - `401 Unauthorized`: Missing or invalid JWT token.
+
+---
+
 ## 5. Excel Bulk Imports (`/api/v1/imports`)
 
 ### 5.1 Bulk Import Spare Parts Catalog
@@ -493,6 +577,8 @@ Retrieves all active spare part brands/manufacturers.
       "name": "Hero",
       "code": "HERO",
       "description": "Hero MotoCorp OEM & Genuine Spares",
+      "default_customer_discount": "5.00",
+      "default_mechanic_discount": "10.00",
       "created_at": "2026-11-25T19:27:37Z",
       "updated_at": "2026-11-25T19:27:37Z"
     }
@@ -510,7 +596,9 @@ Registers a new brand/manufacturer.
   {
     "name": "Brembo",
     "code": "BREM",
-    "description": "High Performance Brake Systems"
+    "description": "High Performance Brake Systems",
+    "default_customer_discount": "5.00",
+    "default_mechanic_discount": "10.00"
   }
   ```
 - **Response (`201 Created`)**: `BrandResponse` object.
@@ -664,6 +752,22 @@ Returns all registered wholesale suppliers and distributor partners along with t
       "default_discount_percentage": "14.50",
       "is_active": true,
       "total_parts_count": 53,
+      "brand_discounts": [
+        {
+          "id": 1,
+          "supplier_id": 1,
+          "brand_id": 1,
+          "brand_name": "Hero",
+          "discount_percentage": "22.00"
+        },
+        {
+          "id": 2,
+          "supplier_id": 1,
+          "brand_id": 2,
+          "brand_name": "Honda",
+          "discount_percentage": "18.00"
+        }
+      ],
       "created_at": "2026-11-26T00:00:00Z",
       "updated_at": "2026-11-26T00:00:00Z"
     }
@@ -671,7 +775,7 @@ Returns all registered wholesale suppliers and distributor partners along with t
   ```
 
 ### 9.2 Create Supplier
-Registers a new distributor or wholesale partner.
+Registers a new distributor or wholesale partner with optional brand-specific purchase discount overrides.
 
 - **Method**: `POST`
 - **Route**: `/api/v1/suppliers`
@@ -685,11 +789,21 @@ Registers a new distributor or wholesale partner.
     "email": "omsai.spares@gmail.com",
     "address": "Badambadi Market, Cuttack, Odisha",
     "gst_number": "21AABCO5678H1Z4",
-    "default_discount_percentage": 18.00,
-    "is_active": true
+    "default_discount_percentage": 15.00,
+    "is_active": true,
+    "brand_discounts": [
+      {
+        "brand_id": 1,
+        "discount_percentage": 22.00
+      },
+      {
+        "brand_id": 2,
+        "discount_percentage": 18.00
+      }
+    ]
   }
   ```
-- **Response (`201 Created`)**: Full `SupplierResponse` object with `total_parts_count: 0`.
+- **Response (`201 Created`)**: Full `SupplierResponse` object with `brand_discounts` and `total_parts_count: 0`.
 
 ### 9.3 Get Supplier by ID
 Retrieves details for a single supplier.

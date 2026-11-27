@@ -1,7 +1,8 @@
 import enum
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
-from sqlalchemy import String, Integer, Numeric, ForeignKey, Enum
+from sqlalchemy import String, Integer, Numeric, ForeignKey, Enum, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from app.models.base import TimestampMixin
@@ -17,6 +18,12 @@ class PaymentMethod(str, enum.Enum):
     CARD = "CARD"
     UPI = "UPI"
     CREDIT = "CREDIT"
+
+
+class SaleStatus(str, enum.Enum):
+    """Lifecycle status of customer counter sales."""
+    COMPLETED = "COMPLETED"
+    VOIDED = "VOIDED"
 
 
 class Sale(Base, TimestampMixin):
@@ -52,6 +59,17 @@ class Sale(Base, TimestampMixin):
 
     payment_method: Mapped[PaymentMethod] = mapped_column(
         Enum(PaymentMethod), default=PaymentMethod.CASH, nullable=False
+    )
+
+    # Invoice Cancellation / Return State
+    status: Mapped[SaleStatus] = mapped_column(
+        Enum(SaleStatus), default=SaleStatus.COMPLETED, server_default="COMPLETED", nullable=False, index=True
+    )
+    cancellation_reason: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     # Relationships

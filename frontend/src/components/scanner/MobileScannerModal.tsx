@@ -32,9 +32,14 @@ export default function MobileScannerModal() {
 
   if (!isModalOpen) return null;
 
-  const isDocker = scannerApi.isDockerInternalIp(hostIp);
+  const isSameOriginProxy = (process.env.NEXT_PUBLIC_API_URL || "").startsWith("/");
+  const isHttpsOrigin = typeof window !== "undefined" && window.location.protocol === "https:";
+  const isDocker = scannerApi.isDockerInternalIp(hostIp) || (typeof hostIp === "string" && hostIp.includes("172."));
   const effectiveHostIp = isDocker || !hostIp || hostIp === "localhost" || hostIp === "127.0.0.1" ? "192.168.1.9" : hostIp;
-  const mobileScanUrl = `http://${effectiveHostIp}:3000/scan?sid=${sessionId}`;
+  const mobileScanUrl =
+    (isHttpsOrigin || isSameOriginProxy) && typeof window !== "undefined"
+      ? `${window.location.origin}/scan?sid=${sessionId}`
+      : `http://${effectiveHostIp}:3000/scan?sid=${sessionId}`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in">

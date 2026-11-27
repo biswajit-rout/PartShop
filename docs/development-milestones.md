@@ -2328,7 +2328,7 @@ export async function apiClient<T>(
 
 #### 2. Domain Modules Implemented under `frontend/src/api/modules/`
 - **`parts.api.ts`**: Provides `partsApi.getAll(search, brand)`, `partsApi.getByBarcode(barcode)`, and `partsApi.create(part)`. Includes `mapBackendPartToFrontend` adapter for automatic snake_case to camelCase conversion and stock status calculation.
-- **`billing.api.ts`**: Provides `billingApi.checkout(payload)` and `billingApi.getInvoiceById(id)`.
+- **`billing.api.ts`**: Provides `billingApi.checkout(payload)`, `billingApi.getInvoices(options)` with date-range/status filtering, `billingApi.getInvoiceById(id)`, `billingApi.updateInvoice(id, payload)` for customer/payment typo edits, and `billingApi.cancelInvoice(id, reason)` for customer returns and atomic inventory reversal.
 - **`imports.api.ts`**: Provides `importsApi.uploadCatalogExcel(file)` using multipart FormData.
 - **`reports.api.ts`**: Provides `reportsApi.getDailySales(dateStr)`, `reportsApi.getTopSelling(limit)`, and `reportsApi.getLowStock()`.
 

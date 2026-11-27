@@ -2,6 +2,14 @@ import { apiClient } from "../client";
 import { Supplier, SparePart } from "@/types";
 import { BackendSparePart, mapBackendPartToFrontend, PaginatedPartsResponse } from "./parts.api";
 
+export interface BackendSupplierBrandDiscount {
+  id: number;
+  supplier_id: number;
+  brand_id: number;
+  brand_name?: string | null;
+  discount_percentage: string | number;
+}
+
 export interface BackendSupplier {
   id: number;
   name: string;
@@ -13,6 +21,7 @@ export interface BackendSupplier {
   default_discount_percentage: string | number;
   total_parts_count: number;
   is_active: boolean;
+  brand_discounts?: BackendSupplierBrandDiscount[];
   created_at?: string;
   updated_at?: string;
 }
@@ -32,6 +41,13 @@ export function mapBackendSupplierToFrontend(s: BackendSupplier): Supplier {
     totalPartsCount: s.total_parts_count || 0,
     totalPurchases: s.total_parts_count || 0,
     isActive: s.is_active,
+    brandDiscounts: (s.brand_discounts || []).map((bd) => ({
+      id: bd.id,
+      supplierId: bd.supplier_id,
+      brandId: bd.brand_id,
+      brandName: bd.brand_name || "",
+      discountPercentage: Number(bd.discount_percentage || 0),
+    })),
     createdAt: s.created_at,
     updatedAt: s.updated_at,
   };
@@ -71,6 +87,7 @@ export const suppliersApi = {
     gst_number?: string;
     default_discount_percentage?: number;
     is_active?: boolean;
+    brand_discounts?: { brand_id: number; discount_percentage: number }[];
   }): Promise<Supplier> {
     const data = await apiClient<BackendSupplier>("/suppliers", {
       method: "POST",
@@ -93,6 +110,7 @@ export const suppliersApi = {
       gst_number?: string;
       default_discount_percentage?: number;
       is_active?: boolean;
+      brand_discounts?: { brand_id: number; discount_percentage: number }[];
     }
   ): Promise<Supplier> {
     const data = await apiClient<BackendSupplier>(`/suppliers/${id}`, {

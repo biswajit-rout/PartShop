@@ -110,6 +110,9 @@ erDiagram
         numeric gst_amount
         numeric grand_total
         varchar payment_method
+        varchar status "COMPLETED, VOIDED"
+        varchar cancellation_reason
+        timestamptz cancelled_at
         timestamptz created_at
     }
 
@@ -146,10 +149,21 @@ erDiagram
         timestamptz updated_at
     }
 
+    supplier_brand_discounts {
+        int id PK
+        int supplier_id FK "Cascade"
+        int brand_id FK "Cascade"
+        numeric discount_percentage "5, 2"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
     users ||--o{ sales : "processes"
     mechanics ||--o{ sales : "credited in"
     mechanics ||--|{ mechanic_brand_commissions : "has"
     brands ||--o{ mechanic_brand_commissions : "configured in"
+    suppliers ||--|{ supplier_brand_discounts : "offers"
+    brands ||--o{ supplier_brand_discounts : "discounted in"
     sales ||--|{ sale_items : "contains"
     spare_parts ||--o{ sale_items : "sold in"
     spare_parts ||--o{ stock_movements : "audited by"
@@ -217,6 +231,9 @@ Stores POS counter sales invoices, cashier details, tax breakdown, and payment m
 | `tax_amount` | `NUMERIC(10, 2)` | `NOT NULL`, Default: `0.00` | Calculated GST amount (CGST + SGST) |
 | `grand_total` | `NUMERIC(10, 2)` | `NOT NULL` | Final billed amount paid by customer |
 | `payment_method` | `VARCHAR(20)` | `NOT NULL`, Default: `'CASH'` | `CASH`, `CARD`, `UPI`, `CREDIT` |
+| `status` | `VARCHAR(20)` | `NOT NULL`, `INDEXED`, Default: `'COMPLETED'` | `COMPLETED`, `VOIDED` |
+| `cancellation_reason` | `VARCHAR(255)` | `NULLABLE` | Audit reason why the invoice was cancelled |
+| `cancelled_at` | `TIMESTAMPTZ` | `NULLABLE` | Timestamp when the invoice was voided and items returned |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Checkout timestamp (UTC) |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
 
@@ -259,6 +276,8 @@ Master manufacturer and aftermarket spares catalog brands.
 | `name` | `VARCHAR(100)` | `UNIQUE`, `NOT NULL`, `INDEXED` | Brand title (Hero, Bajaj, TVS, Honda, etc.) |
 | `code` | `VARCHAR(50)` | `NULLABLE` | Short manufacturer code |
 | `description` | `TEXT` | `NULLABLE` | Brand description and category |
+| `default_customer_discount` | `NUMERIC(5, 2)` | `NOT NULL`, Default: `0.00` | Automated retail selling discount at POS counter |
+| `default_mechanic_discount` | `NUMERIC(5, 2)` | `NOT NULL`, Default: `0.00` | Fallback mechanic partner discount rate |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
 
@@ -319,6 +338,19 @@ Shop operational overhead and daily counter expenditure ledger (Migration: `e7c2
 | `expense_date` | `DATE` | `NOT NULL`, `INDEXED` | Transaction accounting date |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Creation timestamp (UTC) |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Last modification timestamp (UTC) |
+
+### 3.11 `supplier_brand_discounts` Table
+Multi-brand wholesale purchase discount matrix per distributor (Migration: `b8e4f1a2c3d5`).
+
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `INTEGER` | `PRIMARY KEY`, `AUTO_INCREMENT` | Unique override record ID |
+| `supplier_id` | `INTEGER` | `NOT NULL`, `FK -> suppliers.id (CASCADE)` | Wholesaler providing the rate |
+| `brand_id` | `INTEGER` | `NOT NULL`, `FK -> brands.id (CASCADE)` | Manufacturer brand being discounted |
+| `discount_percentage` | `NUMERIC(5, 2)` | `NOT NULL` | Purchase discount % (e.g. 22.00% for Hero) |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Record creation timestamp (UTC) |
+| `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Timestamp (UTC) |
+| *Constraint* | `UNIQUE(supplier_id, brand_id)` | `NOT NULL` | Exactly one discount rate per supplier-brand pair |
 
 ---
 

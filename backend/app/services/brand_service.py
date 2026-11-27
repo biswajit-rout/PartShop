@@ -37,6 +37,8 @@ class BrandService:
             name=data.name.strip(),
             code=data.code.strip() if data.code else None,
             description=data.description.strip() if data.description else None,
+            default_customer_discount=data.default_customer_discount,
+            default_mechanic_discount=data.default_mechanic_discount,
         )
         self.db.add(new_brand)
         await self.db.commit()
@@ -63,6 +65,10 @@ class BrandService:
             brand.code = data.code.strip() if data.code else None
         if data.description is not None:
             brand.description = data.description.strip() if data.description else None
+        if data.default_customer_discount is not None:
+            brand.default_customer_discount = data.default_customer_discount
+        if data.default_mechanic_discount is not None:
+            brand.default_mechanic_discount = data.default_mechanic_discount
 
         await self.db.commit()
         await self.db.refresh(brand)

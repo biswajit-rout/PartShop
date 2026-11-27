@@ -1,8 +1,11 @@
+from decimal import Decimal
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.spare_part import SparePart
-from app.models.supplier import Supplier
+from app.models.supplier import Supplier, SupplierBrandDiscount
+from app.models.brand import Brand
 from app.models.stock_movement import StockMovement, StockMovementType
 from app.repositories.spare_part_repo import SparePartRepository
 from app.schemas.spare_part import SparePartCreate, SparePartUpdate, SparePartRestock
@@ -39,15 +42,49 @@ class InventoryService:
 
         part_dict = part_data.model_dump()
 
-        # If supplier_id is provided, auto-populate supplier_name and discount if missing
+        # If supplier_id is provided, auto-populate supplier_name and brand-specific purchase discount
         if part_data.supplier_id:
-            supp_res = await self.db.execute(select(Supplier).where(Supplier.id == part_data.supplier_id))
+            supp_stmt = (
+                select(Supplier)
+                .options(
+                    selectinload(Supplier.brand_discounts).selectinload(SupplierBrandDiscount.brand)
+                )
+                .where(Supplier.id == part_data.supplier_id)
+            )
+            supp_res = await self.db.execute(supp_stmt)
             supplier = supp_res.scalar_one_or_none()
             if supplier:
                 if not part_dict.get("supplier_name"):
                     part_dict["supplier_name"] = supplier.name
+                
+                # Check brand-specific supplier discount
+                effective_disc = supplier.default_discount_percentage
+                brand_clean = (part_data.brand_name or "").strip().lower()
+                for bd in supplier.brand_discounts:
+                    if bd.brand and bd.brand.name.strip().lower() == brand_clean:
+                        effective_disc = bd.discount_percentage
+                        break
+                
                 if not part_dict.get("supplier_discount"):
-                    part_dict["supplier_discount"] = supplier.default_discount_percentage
+                    part_dict["supplier_discount"] = effective_disc
+
+                # Auto-calculate purchase price if missing and selling price is given
+                if (not part_dict.get("purchase_price") or part_dict.get("purchase_price") == 0) and part_dict.get("selling_price", 0) > 0:
+                    part_dict["purchase_price"] = round(
+                        part_dict["selling_price"] * (Decimal("1.00") - (effective_disc / Decimal("100.00"))), 2
+                    )
+
+        # Auto-populate brand-default customer & mechanic selling discounts if not set
+        if part_data.brand_name:
+            brand_res = await self.db.execute(
+                select(Brand).where(Brand.name.ilike(part_data.brand_name.strip()))
+            )
+            brand = brand_res.scalar_one_or_none()
+            if brand:
+                if not part_dict.get("customer_discount") and brand.default_customer_discount > 0:
+                    part_dict["customer_discount"] = brand.default_customer_discount
+                if not part_dict.get("mechanic_discount") and brand.default_mechanic_discount > 0:
+                    part_dict["mechanic_discount"] = brand.default_mechanic_discount
 
         new_part = SparePart(**part_dict)
         created = await self.repo.create(new_part)

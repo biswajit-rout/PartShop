@@ -13,11 +13,15 @@ const STORAGE_KEY = "partshop_scanner_host_ip";
 
 export const scannerApi = {
   /**
-   * Checks if an IP looks like Docker's internal container network (172.16.x.x - 172.31.x.x).
+   * Checks if an IP looks like Docker's internal container network (172.16.x.x - 172.31.x.x) or loopback.
    */
   isDockerInternalIp(ip: string): boolean {
     if (!ip) return false;
-    const parts = ip.trim().split(".");
+    const cleanIp = ip.split(":")[0].trim();
+    if (cleanIp === "localhost" || cleanIp === "127.0.0.1" || cleanIp.startsWith("127.")) {
+      return true;
+    }
+    const parts = cleanIp.split(".");
     if (parts.length === 4 && parts[0] === "172") {
       const second = parseInt(parts[1], 10);
       return !isNaN(second) && second >= 16 && second <= 31;
@@ -85,8 +89,36 @@ export const scannerApi = {
 
   /**
    * Constructs the WebSocket URL for pairing.
+   * Supports:
+   * 1. Reverse-proxied same-origin production deployments (NEXT_PUBLIC_API_URL="/api/v1")
+   * 2. Explicit remote API URLs (e.g. "https://api.example.com/api/v1")
+   * 3. Local LAN development mode (direct port 8001 on host LAN IP)
    */
   getWebSocketUrl(sessionId: string, hostOverride?: string): string {
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "";
+
+    // 1. Same-origin reverse proxy mode (e.g. Caddy in production)
+    if (apiBaseUrl.startsWith("/") && typeof window !== "undefined") {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const cleanBase = apiBaseUrl.replace(/\/+$/, "");
+      return `${protocol}//${window.location.host}${cleanBase}/scanner/ws/${sessionId}`;
+    }
+
+    // 2. Explicit remote API origin (non-localhost)
+    if (apiBaseUrl.startsWith("http://") || apiBaseUrl.startsWith("https://")) {
+      try {
+        const parsed = new URL(apiBaseUrl);
+        if (parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
+          const wsProtocol = parsed.protocol === "https:" ? "wss:" : "ws:";
+          const cleanPath = parsed.pathname.replace(/\/+$/, "");
+          return `${wsProtocol}//${parsed.host}${cleanPath}/scanner/ws/${sessionId}`;
+        }
+      } catch {
+        // Fall through to local LAN mode
+      }
+    }
+
+    // 3. Local / LAN development mode
     let host = hostOverride;
     if (!host && typeof window !== "undefined") {
       host = window.location.hostname;

@@ -107,7 +107,7 @@ export function ScannerProvider({
 
       // If saved IP is a Docker internal IP (172.16-31.x.x), purge it immediately
       let validSaved = saved;
-      if (saved && scannerApi.isDockerInternalIp(saved)) {
+      if (saved && (scannerApi.isDockerInternalIp(saved) || saved.includes("172."))) {
         try {
           localStorage.removeItem("partshop_scanner_host_ip");
         } catch {}
@@ -116,19 +116,19 @@ export function ScannerProvider({
 
       // Prioritize reachable LAN IP
       let initialIp = validSaved;
-      if (!initialIp && info.primary_ip && !scannerApi.isDockerInternalIp(info.primary_ip)) {
+      if (!initialIp && info.primary_ip && !scannerApi.isDockerInternalIp(info.primary_ip) && !info.primary_ip.includes("172.")) {
         initialIp = info.primary_ip;
       }
       if (!initialIp && typeof window !== "undefined" && window.location.hostname) {
         const winHost = window.location.hostname;
-        if (winHost !== "localhost" && winHost !== "127.0.0.1" && !scannerApi.isDockerInternalIp(winHost)) {
+        if (winHost !== "localhost" && winHost !== "127.0.0.1" && !scannerApi.isDockerInternalIp(winHost) && !winHost.includes("172.")) {
           initialIp = winHost;
         }
       }
       if (!initialIp && info.all_ips?.length) {
-        initialIp = info.all_ips.find((ip) => !scannerApi.isDockerInternalIp(ip) && !ip.startsWith("127.")) || null;
+        initialIp = info.all_ips.find((ip) => !scannerApi.isDockerInternalIp(ip) && !ip.startsWith("127.") && !ip.includes("172.")) || null;
       }
-      if (!initialIp || scannerApi.isDockerInternalIp(initialIp)) {
+      if (!initialIp || scannerApi.isDockerInternalIp(initialIp) || initialIp.includes("172.")) {
         initialIp = "192.168.1.9";
       }
 

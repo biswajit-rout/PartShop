@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.mechanic import Mechanic, MechanicBrandCommission
 from app.models.brand import Brand
-from app.models.sale import Sale, SaleItem
+from app.models.sale import Sale, SaleItem, SaleStatus
 from app.models.spare_part import SparePart
 from app.schemas.mechanic import (
     MechanicCreate,
@@ -199,7 +199,8 @@ class MechanicService:
             .join(Sale, SaleItem.sale_id == Sale.id)
             .join(SparePart, SaleItem.spare_part_id == SparePart.id)
             .where(
-                (SaleItem.mechanic_id == mechanic_id) | (Sale.mechanic_id == mechanic_id)
+                ((SaleItem.mechanic_id == mechanic_id) | (Sale.mechanic_id == mechanic_id)),
+                Sale.status == SaleStatus.COMPLETED,
             )
         )
 
@@ -250,7 +251,8 @@ class MechanicService:
             )
             .join(Sale, SaleItem.sale_id == Sale.id)
             .where(
-                (SaleItem.mechanic_id == mechanic_id) | (Sale.mechanic_id == mechanic_id)
+                ((SaleItem.mechanic_id == mechanic_id) | (Sale.mechanic_id == mechanic_id)),
+                Sale.status == SaleStatus.COMPLETED,
             )
         )
 

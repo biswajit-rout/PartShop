@@ -140,7 +140,10 @@ export async function apiClient<T>(
   - `mapBackendPartToFrontend`: Adapter transforming snake_case backend models to camelCase frontend models and automatically determining `StockStatus`.
 - **`billing.api.ts`**:
   - `billingApi.checkout(payload)`: Atomic checkout transaction with row-level locks and GST.
+  - `billingApi.getInvoices(options)`: Query past counter invoices with keyword search, temporal ranges, and lifecycle statuses.
   - `billingApi.getInvoiceById(id)`: Thermal receipt fetching.
+  - `billingApi.updateInvoice(id, payload)`: Patch invoice customer name, phone, or payment method.
+  - `billingApi.cancelInvoice(id, reason)`: Execute invoice voiding and atomic inventory return restoration.
 - **`imports.api.ts`**:
   - `importsApi.uploadCatalogExcel(file)`: Multipart `FormData` upload for `.xlsx` catalogs with row-by-row error reporting.
 - **`reports.api.ts`**:

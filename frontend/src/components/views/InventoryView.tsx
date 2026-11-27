@@ -72,8 +72,13 @@ export default function InventoryView({
   const [newBrandName, setNewBrandName] = useState("");
   const [newBrandCode, setNewBrandCode] = useState("");
   const [newBrandDesc, setNewBrandDesc] = useState("");
+  const [newBrandCustomerDisc, setNewBrandCustomerDisc] = useState("5.00");
+  const [newBrandMechanicDisc, setNewBrandMechanicDisc] = useState("10.00");
   const [isAddingBrand, setIsAddingBrand] = useState(false);
   const [brandError, setBrandError] = useState<string | null>(null);
+  const [editingBrandId, setEditingBrandId] = useState<number | null>(null);
+  const [editBrandCustomerDisc, setEditBrandCustomerDisc] = useState("");
+  const [editBrandMechanicDisc, setEditBrandMechanicDisc] = useState("");
 
   // Manual Add Part Modal States
   const [showAddModal, setShowAddModal] = useState(false);
@@ -371,15 +376,38 @@ export default function InventoryView({
         name: newBrandName.trim(),
         code: newBrandCode.trim() || undefined,
         description: newBrandDesc.trim() || undefined,
+        default_customer_discount: parseFloat(newBrandCustomerDisc) || 0,
+        default_mechanic_discount: parseFloat(newBrandMechanicDisc) || 0,
       });
       setAvailableBrands((prev) => [...prev, created]);
       setNewBrandName("");
       setNewBrandCode("");
       setNewBrandDesc("");
+      setNewBrandCustomerDisc("5.00");
+      setNewBrandMechanicDisc("10.00");
     } catch (err: any) {
       setBrandError(err.message || "Failed to save brand.");
     } finally {
       setIsAddingBrand(false);
+    }
+  };
+
+  const handleStartEditBrand = (b: Brand) => {
+    setEditingBrandId(b.id);
+    setEditBrandCustomerDisc(String(b.defaultCustomerDiscount || 0));
+    setEditBrandMechanicDisc(String(b.defaultMechanicDiscount || 0));
+  };
+
+  const handleSaveBrandDiscount = async (brandId: number) => {
+    try {
+      const updated = await brandsApi.update(brandId, {
+        default_customer_discount: parseFloat(editBrandCustomerDisc) || 0,
+        default_mechanic_discount: parseFloat(editBrandMechanicDisc) || 0,
+      });
+      setAvailableBrands((prev) => prev.map((b) => (b.id === brandId ? updated : b)));
+      setEditingBrandId(null);
+    } catch (err: any) {
+      setBrandError(err.message || "Failed to update brand discounts.");
     }
   };
 
@@ -885,6 +913,22 @@ export default function InventoryView({
                 value={newBrandDesc}
                 onChange={(e) => setNewBrandDesc(e.target.value)}
               />
+              <div className="grid grid-cols-2 gap-2.5">
+                <GlassInput
+                  label="Default Retail Selling Disc (%)"
+                  type="number"
+                  placeholder="e.g. 5.00"
+                  value={newBrandCustomerDisc}
+                  onChange={(e) => setNewBrandCustomerDisc(e.target.value)}
+                />
+                <GlassInput
+                  label="Default Mechanic Selling Disc (%)"
+                  type="number"
+                  placeholder="e.g. 10.00"
+                  value={newBrandMechanicDisc}
+                  onChange={(e) => setNewBrandMechanicDisc(e.target.value)}
+                />
+              </div>
               <div className="flex justify-end">
                 <GlassButton
                   type="submit"
@@ -902,20 +946,83 @@ export default function InventoryView({
               <h4 className="text-xs font-bold text-slate-400 uppercase font-mono tracking-wider">
                 Registered Brands Catalog
               </h4>
-              <div className="divide-y divide-white/5 max-h-56 overflow-y-auto pr-1">
+              <div className="divide-y divide-white/5 max-h-64 overflow-y-auto pr-1 space-y-1">
                 {availableBrands.map((b) => (
-                  <div key={b.id} className="py-2.5 flex items-center justify-between text-xs">
-                    <div>
-                      <span className="font-bold text-white text-sm">{b.name}</span>
-                      {b.code && (
-                        <span className="ml-2 px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-[10px]">
-                          {b.code}
-                        </span>
-                      )}
+                  <div key={b.id} className="py-2.5 flex items-center justify-between text-xs gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-white text-sm">{b.name}</span>
+                        {b.code && (
+                          <span className="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono text-[10px]">
+                            {b.code}
+                          </span>
+                        )}
+                      </div>
                       {b.description && (
-                        <p className="text-[11px] text-slate-400 mt-0.5">{b.description}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5 truncate">{b.description}</p>
+                      )}
+                      
+                      {editingBrandId === b.id ? (
+                        <div className="mt-2 p-2 rounded-xl bg-black/40 border border-white/10 flex items-center gap-2">
+                          <div className="flex-1">
+                            <span className="text-[10px] text-slate-400 block mb-0.5">Retail Disc %:</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={editBrandCustomerDisc}
+                              onChange={(e) => setEditBrandCustomerDisc(e.target.value)}
+                              className="glass-input h-7 w-full px-2 text-xs font-mono text-emerald-400 font-bold rounded"
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <span className="text-[10px] text-slate-400 block mb-0.5">Mechanic Disc %:</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={editBrandMechanicDisc}
+                              onChange={(e) => setEditBrandMechanicDisc(e.target.value)}
+                              className="glass-input h-7 w-full px-2 text-xs font-mono text-sky-400 font-bold rounded"
+                            />
+                          </div>
+                          <div className="flex items-center gap-1 self-end mb-0.5">
+                            <button
+                              type="button"
+                              onClick={() => handleSaveBrandDiscount(b.id)}
+                              className="px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[10px] font-mono font-bold border border-emerald-500/30 cursor-pointer"
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingBrandId(null)}
+                              className="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-slate-400 text-[10px] cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300">
+                            Retail: <strong>{b.defaultCustomerDiscount || 0}%</strong>
+                          </span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-300">
+                            Mechanic: <strong>{b.defaultMechanicDiscount || 0}%</strong>
+                          </span>
+                        </div>
                       )}
                     </div>
+
+                    {editingBrandId !== b.id && (
+                      <button
+                        type="button"
+                        onClick={() => handleStartEditBrand(b)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
+                        title="Edit selling discounts"
+                      >
+                        <Edit2 size={13} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

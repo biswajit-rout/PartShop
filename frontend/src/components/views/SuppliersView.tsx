@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Supplier, SparePart } from "@/types";
+import { Supplier, SparePart, Brand } from "@/types";
 import { formatRupees } from "@/utils/formatters";
 import { matchSearchTokens } from "@/utils/search";
-import { suppliersApi, importsApi, ImportSummaryResponse } from "@/api";
+import { suppliersApi, importsApi, brandsApi, ImportSummaryResponse } from "@/api";
 import PageHeading from "@/components/common/PageHeading";
 import GlassCard from "@/components/ui/glass/GlassCard";
 import GlassButton from "@/components/ui/glass/GlassButton";
@@ -26,6 +26,7 @@ import {
   Sparkles,
   Percent,
   FileSpreadsheet,
+  Layers,
 } from "lucide-react";
 
 interface SuppliersViewProps {
@@ -37,6 +38,10 @@ export default function SuppliersView({ onRefreshCatalog }: SuppliersViewProps) 
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Available Brands & Supplier Brand Discounts
+  const [availableBrands, setAvailableBrands] = useState<Brand[]>([]);
+  const [brandDiscounts, setBrandDiscounts] = useState<{ brand_id: number; discount_percentage: string }[]>([]);
 
   // Add / Edit Supplier Modal States
   const [showSupplierModal, setShowSupplierModal] = useState(false);
@@ -69,13 +74,17 @@ export default function SuppliersView({ onRefreshCatalog }: SuppliersViewProps) 
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. Load live suppliers on mount
+  // 1. Load live suppliers & brands on mount
   const loadSuppliers = async () => {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const data = await suppliersApi.getAll();
-      setSuppliers(data);
+      const [suppliersData, brandsData] = await Promise.all([
+        suppliersApi.getAll(),
+        brandsApi.getAll().catch(() => []),
+      ]);
+      setSuppliers(suppliersData);
+      setAvailableBrands(brandsData);
     } catch (err: any) {
       console.warn("Could not load suppliers:", err);
       setLoadError(err.message || "Failed to load suppliers from backend.");
@@ -107,6 +116,7 @@ export default function SuppliersView({ onRefreshCatalog }: SuppliersViewProps) 
       default_discount_percentage: "15.00",
       is_active: true,
     });
+    setBrandDiscounts([]);
     setSupplierModalError(null);
     setShowSupplierModal(true);
   };
@@ -124,8 +134,45 @@ export default function SuppliersView({ onRefreshCatalog }: SuppliersViewProps) 
       default_discount_percentage: String(supplier.defaultDiscountPercentage || 0),
       is_active: supplier.isActive !== undefined ? supplier.isActive : true,
     });
+    setBrandDiscounts(
+      (supplier.brandDiscounts || []).map((bd) => ({
+        brand_id: bd.brandId,
+        discount_percentage: String(bd.discountPercentage),
+      }))
+    );
     setSupplierModalError(null);
     setShowSupplierModal(true);
+  };
+
+  const handleAddBrandDiscountRow = () => {
+    const unusedBrand = availableBrands.find(
+      (b) => !brandDiscounts.some((d) => d.brand_id === b.id)
+    );
+    setBrandDiscounts([
+      ...brandDiscounts,
+      {
+        brand_id: unusedBrand ? unusedBrand.id : (availableBrands[0]?.id || 0),
+        discount_percentage: "20.00",
+      },
+    ]);
+  };
+
+  const handleUpdateBrandDiscountRow = (
+    index: number,
+    field: "brand_id" | "discount_percentage",
+    value: string | number
+  ) => {
+    const updated = [...brandDiscounts];
+    if (field === "brand_id") {
+      updated[index].brand_id = Number(value);
+    } else {
+      updated[index].discount_percentage = String(value);
+    }
+    setBrandDiscounts(updated);
+  };
+
+  const handleRemoveBrandDiscountRow = (index: number) => {
+    setBrandDiscounts(brandDiscounts.filter((_, idx) => idx !== index));
   };
 
   // Submit Add / Edit Supplier
@@ -149,6 +196,12 @@ export default function SuppliersView({ onRefreshCatalog }: SuppliersViewProps) 
         gst_number: supplierForm.gst_number.trim() || undefined,
         default_discount_percentage: parseFloat(supplierForm.default_discount_percentage) || 0,
         is_active: supplierForm.is_active,
+        brand_discounts: brandDiscounts
+          .filter((d) => d.brand_id && d.discount_percentage !== "")
+          .map((d) => ({
+            brand_id: Number(d.brand_id),
+            discount_percentage: parseFloat(d.discount_percentage) || 0,
+          })),
       };
 
       if (editingSupplier) {
@@ -330,12 +383,32 @@ export default function SuppliersView({ onRefreshCatalog }: SuppliersViewProps) 
                 {/* Key Metrics Chips */}
                 <div className="flex flex-wrap items-center gap-2 mb-3.5">
                   <span className="inline-flex items-center gap-1 text-[11px] font-mono px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-400/20 text-emerald-300 font-semibold">
-                    <Percent size={11} /> {supplier.defaultDiscountPercentage || 0}% Purchase Disc
+                    <Percent size={11} /> {supplier.defaultDiscountPercentage || 0}% Base Disc
                   </span>
                   <span className="inline-flex items-center gap-1 text-[11px] font-mono px-2.5 py-1 rounded-lg bg-sky-500/10 border border-sky-400/20 text-sky-300 font-semibold">
                     <Package size={11} /> {supplier.totalPartsCount || 0} Parts Mapped
                   </span>
                 </div>
+
+                {/* Multi-Brand Discounts Badges */}
+                {supplier.brandDiscounts && supplier.brandDiscounts.length > 0 && (
+                  <div className="mb-3.5 p-2 rounded-xl bg-black/20 border border-white/5 space-y-1">
+                    <span className="text-[10px] font-mono text-slate-400 block font-semibold">
+                      Brand Purchase Rates:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {supplier.brandDiscounts.map((bd) => (
+                        <span
+                          key={bd.brandId}
+                          className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-400/25 text-sky-200"
+                        >
+                          <span className="font-semibold text-white">{bd.brandName}</span>
+                          <span className="text-emerald-400 font-bold">{bd.discountPercentage}%</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Detailed Contact List */}
                 <div className="space-y-2 text-xs text-slate-300 font-sans border-t border-white/10 pt-3">
@@ -534,6 +607,85 @@ export default function SuppliersView({ onRefreshCatalog }: SuppliersViewProps) 
                   onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })}
                   className="glass-input w-full p-2.5 rounded-xl text-xs font-sans resize-none"
                 />
+              </div>
+
+              {/* Multi-Brand Purchase Discount Matrix */}
+              <div className="pt-3 border-t border-white/10 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-mono font-bold text-white flex items-center gap-1.5">
+                      <Layers size={13} className="text-sky-400" />
+                      Multi-Brand Purchase Discount Overrides
+                    </h4>
+                    <p className="text-[10px] text-slate-400">
+                      Configure custom wholesale discount percentages for different brands supplied (e.g. Hero 22%, Honda 18%, Bajaj 25%).
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddBrandDiscountRow}
+                    className="px-2.5 py-1 text-[11px] font-mono rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                  >
+                    <Plus size={12} /> Add Brand
+                  </button>
+                </div>
+
+                {brandDiscounts.length > 0 ? (
+                  <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                    {brandDiscounts.map((row, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center gap-2 bg-black/30 p-2 rounded-xl border border-white/5"
+                      >
+                        <select
+                          value={row.brand_id}
+                          onChange={(e) =>
+                            handleUpdateBrandDiscountRow(idx, "brand_id", e.target.value)
+                          }
+                          className="glass-input h-8 flex-1 px-2.5 rounded-lg text-xs font-sans"
+                        >
+                          <option value="" disabled className="bg-slate-900">
+                            Select Brand
+                          </option>
+                          {availableBrands.map((b) => (
+                            <option key={b.id} value={b.id} className="bg-slate-900">
+                              {b.name}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="relative w-28 shrink-0">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            max="100"
+                            placeholder="e.g. 22"
+                            value={row.discount_percentage}
+                            onChange={(e) =>
+                              handleUpdateBrandDiscountRow(idx, "discount_percentage", e.target.value)
+                            }
+                            className="glass-input h-8 w-full px-2 rounded-lg text-xs font-mono text-emerald-400 font-bold pr-6"
+                          />
+                          <span className="absolute right-2 top-2 text-[10px] text-slate-400">%</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveBrandDiscountRow(idx)}
+                          className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/20 transition-colors shrink-0 cursor-pointer"
+                          title="Remove brand override"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-2.5 rounded-xl bg-white/[0.02] border border-dashed border-white/10 text-center">
+                    <span className="text-[11px] text-slate-400">
+                      No brand-specific overrides configured. All parts from this supplier will use the default {supplierForm.default_discount_percentage || 0}% discount rate.
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-white/10">

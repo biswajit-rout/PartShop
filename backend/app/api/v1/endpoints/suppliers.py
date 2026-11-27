@@ -33,12 +33,9 @@ async def create_supplier(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_role([UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
 ):
-    """Register a new supplier / distributor partner."""
+    """Register a new supplier / distributor partner with brand discounts."""
     service = SupplierService(db)
-    supplier = await service.create_supplier(data)
-    resp = SupplierResponse.model_validate(supplier)
-    resp.total_parts_count = 0
-    return resp
+    return await service.create_supplier(data)
 
 
 # 3. Get Single Supplier
@@ -48,15 +45,9 @@ async def get_supplier(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Get supplier details by ID."""
+    """Get supplier details by ID including brand discounts and part counts."""
     service = SupplierService(db)
-    supplier = await service.get_supplier_by_id(supplier_id)
-    # Get total parts count
-    suppliers_list = await service.list_suppliers()
-    count = next((s.total_parts_count for s in suppliers_list if s.id == supplier_id), 0)
-    resp = SupplierResponse.model_validate(supplier)
-    resp.total_parts_count = count
-    return resp
+    return await service.get_supplier_response(supplier_id)
 
 
 # 4. Update Supplier
@@ -67,14 +58,9 @@ async def update_supplier(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_role([UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
 ):
-    """Update supplier contact info, GSTIN, or default discount percentage."""
+    """Update supplier contact info, GSTIN, default discount percentage, or brand discounts."""
     service = SupplierService(db)
-    supplier = await service.update_supplier(supplier_id, data)
-    suppliers_list = await service.list_suppliers()
-    count = next((s.total_parts_count for s in suppliers_list if s.id == supplier_id), 0)
-    resp = SupplierResponse.model_validate(supplier)
-    resp.total_parts_count = count
-    return resp
+    return await service.update_supplier(supplier_id, data)
 
 
 # 5. Delete Supplier
