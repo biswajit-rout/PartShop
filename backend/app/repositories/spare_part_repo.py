@@ -62,14 +62,20 @@ class SparePartRepository(BaseRepository[SparePart]):
     def __init__(self, db: AsyncSession):
         super().__init__(SparePart, db)
 
-    async def get_by_barcode(self, barcode: str) -> SparePart | None:
+    async def get_by_barcode(self, barcode: str, include_deleted: bool = False) -> SparePart | None:
         """Instant lookup by barcode scanner gun at the billing counter."""
-        result = await self.db.execute(select(SparePart).where(SparePart.barcode == barcode))
+        stmt = select(SparePart).where(SparePart.barcode == barcode)
+        if not include_deleted:
+            stmt = stmt.where(SparePart.is_deleted == False)
+        result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_by_part_number(self, part_number: str) -> SparePart | None:
+    async def get_by_part_number(self, part_number: str, include_deleted: bool = False) -> SparePart | None:
         """Lookup by exact OEM part number."""
-        result = await self.db.execute(select(SparePart).where(SparePart.part_number == part_number))
+        stmt = select(SparePart).where(SparePart.part_number == part_number)
+        if not include_deleted:
+            stmt = stmt.where(SparePart.is_deleted == False)
+        result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
     async def search_parts(
@@ -79,6 +85,7 @@ class SparePartRepository(BaseRepository[SparePart]):
         supplier_id: int | None = None,
         low_stock_only: bool = False,
         is_confirmed: bool | None = None,
+        is_deleted: bool = False,
         skip: int = 0,
         limit: int = 50,
     ) -> tuple[list[SparePart], int]:
@@ -89,6 +96,9 @@ class SparePartRepository(BaseRepository[SparePart]):
         Requires all tokens in the query to match across any field (AND-joined tokens).
         """
         stmt = select(SparePart)
+
+        # Filter deletion status (active catalog vs recycle bin)
+        stmt = stmt.where(SparePart.is_deleted == is_deleted)
 
         # Full-text multi-token multi-field search with automotive synonym expansion
         if query and query.strip():

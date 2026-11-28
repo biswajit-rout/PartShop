@@ -72,28 +72,47 @@ Expected tables:
 - barcode
 - qr\_code
 - is\_confirmed (boolean, default true for existing items, indexed)
+- is_deleted (boolean, default false, indexed)
+- deleted_at (timestamptz, nullable)
 - created\_at
 
 ---
 
-## Inventory Confirmation & Bulk Upload Staging Lifecycle
+## Inventory Confirmation, Soft Deletion & Supplier Valuation Lifecycle
 
-To prevent unvalidated or unorganized items from entering active counter sales before rack locations and prices are verified:
-
-### 1. Two-Stage Catalog Architecture
+### 1. Three-Stage Catalog Architecture
 - **🟢 Confirmed Items Sub-Tab**:
   - Contains validated spare parts with verified rack/shelf locations and pricing.
-  - Active and searchable on the POS billing counter and search auto-completes.
+  - Active and searchable on the POS billing counter, top header search, and dedicated search views.
+  - Supports Goods Inward / Restock, single-item editing, and soft deletion to Recycle Bin.
 - **🟡 Unconfirmed / Staging Queue Sub-Tab**:
   - Automatically receives all new items imported via bulk Excel (.xlsx) uploads (`is_confirmed = False`).
+  - Visibly badged as `🟡 Unconfirmed`.
+  - **POS & Restock Lock**: Completely locked from billing checkout (backend rejects with `HTTP 400`, frontend search and barcode scanner reject with error toast). Restock action is hidden in UI and rejected by backend (`HTTP 400`).
+  - **Search Lock**: Unconfirmed items are hidden from header search and the dedicated search page to prevent selling unverified inventory.
   - Highlights missing rack numbers (`⚠️ Missing Rack`) to prompt warehouse location assignment.
-  - Hidden from POS checkout searches until explicitly verified.
+  - Supports single-row confirmation, single-row delete, multi-select batch confirmation, and multi-select batch deletion.
+- **🔴 Deleted Items / Recycle Bin Sub-Tab**:
+  - Displays all soft-deleted parts (`is_deleted = True`, `deleted_at != null`).
+  - Excluded from active catalog and sales.
+  - Features single-row Restore and multi-select floating action bar for bulk restoration (`POST /api/v1/parts/restore-batch`).
 
-### 2. Multi-Select & Batch Confirmation
-- Checkbox on every unconfirmed table row + master checkbox to select/deselect all visible items.
-- Floating multi-selection action bar displaying selected item count with a one-click `Confirm Selected (X) & Move to Catalog` action.
+### 2. Multi-Select & Batch Operations
+- Checkbox on every unconfirmed and deleted table row + master checkbox to select/deselect all visible items.
+- Floating multi-selection action bar displaying selected item count with:
+  - Unconfirmed queue: `Delete Selected (X)` and `Confirm Selected (X) & Move to Catalog`.
+  - Recycle bin: `Restore Selected (X)`.
 - Single-item confirmation with optional inline rack location assignment modal.
-- Once confirmed, items immediately transition to `is_confirmed = True` and appear in the confirmed catalog.
+
+### 3. Supplier Stock Valuation & Daily Inward Filter
+- In the **Suppliers** tab, clicking **"View Items"** on any distributor displays:
+  - **Entry Date Filter**: Dropdown grouping parts by inward date with item counts (e.g. `2026-11-28 (15 items)`) and an `All Entry Dates` option.
+  - **Daily Inward KPI Banner**: 4 summary metric cards computing real-time valuation for the selected date:
+    1. Filtered SKUs count
+    2. Total Units Inward (sum of quantities)
+    3. Stock Cost Valuation (₹ purchase price × quantity)
+    4. Retail Valuation (₹ MRP / selling price × quantity)
+  - **Parts Table**: Includes a dedicated `Entry Date` column showing formatted timestamp for daily reconciliation.
 
 ### Suppliers
 

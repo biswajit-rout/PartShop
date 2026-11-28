@@ -475,6 +475,17 @@ export default function BillingView({
   }, [selectedMechanicId]);
 
   const handleAddItemByPart = (part: SparePart) => {
+    if (part.isDeleted) {
+      setCheckoutError(`Cannot sell deleted part "${part.name}".`);
+      setTimeout(() => setCheckoutError(null), 4000);
+      return;
+    }
+    if (part.isConfirmed === false) {
+      setCheckoutError(`Cannot bill unconfirmed item "${part.name}". Please verify and confirm it in Inventory before selling.`);
+      setTimeout(() => setCheckoutError(null), 4000);
+      return;
+    }
+
     const existingIndex = items.findIndex((i) => i.part.id === part.id);
     if (existingIndex > -1) {
       const updated = [...items];
@@ -489,11 +500,11 @@ export default function BillingView({
   };
 
   // Autocomplete matching: matches bike model, part name, SKU, or barcode using tokenized search
-  // Excludes unconfirmed/staging parts so counter staff only bill validated items
+  // Excludes unconfirmed/staging parts and deleted parts so counter staff only bill validated items
   const searchMatches = barcodeInput.trim()
     ? products
         .filter((p) => {
-          if (p.isConfirmed === false) return false;
+          if (p.isConfirmed === false || p.isDeleted) return false;
           const target = `${p.compatibleBikes} ${p.modelNumber} ${p.name} ${p.partNumber} ${p.brand} ${p.barcode}`;
           return matchSearchTokens(target, barcodeInput);
         })

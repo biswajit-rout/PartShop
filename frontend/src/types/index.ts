@@ -31,6 +31,9 @@ export interface SparePart {
   status: StockStatus;
   barcode: string;
   isConfirmed?: boolean;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  createdAt?: string;
 }
 
 export interface Brand {

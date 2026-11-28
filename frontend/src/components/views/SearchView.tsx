@@ -91,6 +91,7 @@ export default function SearchView({ products, onNavigate, onRefreshCatalog }: S
     if (!trimmed) return [];
 
     return products.filter((item) => {
+      if (item.isConfirmed === false || item.isDeleted) return false;
       const searchTarget = `${item.name} ${item.brand} ${item.partNumber} ${item.modelNumber} ${item.compatibleBikes} ${item.rackNumber} ${item.barcode} ${item.supplierName || ""}`;
       return matchSearchTokens(searchTarget, trimmed);
     });

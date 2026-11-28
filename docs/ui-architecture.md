@@ -343,19 +343,28 @@ The seven domain views in `src/components/views/` correspond directly to the fun
 - **Top Movers**: Ranked list of highest volume turnaround spare parts.
 
 ### 7.2 Inventory Module (`InventoryView.tsx`)
-Features a 2-sub-tab catalog confirmation & staging architecture:
+Features a 3-sub-tab catalog confirmation, staging & soft-delete lifecycle architecture:
 1. **🟢 Confirmed Items Sub-Tab**:
    - Displays all validated, verified spare parts that are active for POS counter sales and barcode gun scanning.
    - Shows live count badge (`{confirmedCount}`) with verified status pill.
    - Real-time multi-token automotive search and brand/supplier/status dropdown filters.
-   - Fast Restock (Goods Inward) modal and full part editing modal.
+   - Fast Restock (Goods Inward) modal, full part editing modal, and soft delete action (moves part to Recycle Bin).
 2. **🟡 Unconfirmed / Bulk Uploads Sub-Tab**:
    - Dedicated staging queue where parts imported from Excel workbooks (.xlsx) automatically land (`is_confirmed = False`).
+   - Visibly badged as `🟡 Unconfirmed`.
+   - **Sales & Restock Lock**: Completely locked from POS billing (counter autocomplete search and barcode scanning reject with error toast) and blocked from restock in UI. Excluded from top header search and dedicated Search view.
    - Dynamic counter badge (`{unconfirmedCount}`) with pulsing animation when items require verification.
    - **Multi-Selection Checkbox Controls**: Table header master checkbox to select/deselect all visible items, plus individual row checkboxes.
-   - **Floating / Sticky Batch Action Bar**: Displays selected item count with a one-click `Confirm Selected (X) & Move to Catalog` action.
+   - **Floating / Sticky Batch Action Bar**: Displays selected item count with:
+     - `Delete Selected (X)`: Atomic bulk soft-deletion to Recycle Bin.
+     - `Confirm Selected (X) & Move to Catalog`: Atomic bulk confirmation to active sales catalog.
    - **Rack Location Verification**: Unassigned items display a prominent amber `⚠️ Missing Rack` button that triggers a quick rack assignment & confirmation modal.
-   - **Single-Click Confirm**: Immediate confirmation action button per row that activates the part and transitions it into the confirmed catalog.
+   - **Row Actions**: Single-click Confirm, Edit, and Delete (moves item to Recycle Bin).
+3. **🔴 Deleted Items / Recycle Bin Sub-Tab**:
+   - Displays soft-deleted parts (`is_deleted = True`, `deleted_at != null`).
+   - Badged as `🔴 Deleted` with deletion timestamp.
+   - Checkbox multi-selection with floating action bar: `Restore Selected (X)`.
+   - Single-row `🔄 Restore` action returning part to active catalog.
 - **Brand Master Modal**: Live brand creation and default customer/mechanic discount percentage editor.
 - **Excel Import Specification**: Upload modal supporting supplier mapping, brand overrides, and purchase discount auto-calculations.
 
@@ -380,6 +389,10 @@ Features a 2-sub-tab architecture:
 - **Directory Grid**: Cards detailing wholesale distributor credentials.
 - **Compliance Tracking**: Displays formal GSTIN numbers (e.g., `29ABCDE1234F1Z5`), primary contact persons, phone numbers, and physical warehouse addresses.
 - **Purchase Order Tracking**: Displays total purchase order counts and purchase invoice ledger view triggers.
+- **View Items Modal with Daily Inward Valuation**:
+  - **Date Filter Dropdown**: Allows filtering parts entered on specific days (e.g. `2026-11-28 (15 items)`) or `All Entry Dates`.
+  - **Daily Inward KPI Banner**: Displays 4 real-time valuation metrics: Filtered SKUs count, Total Inward Units, Total Stock Cost Valuation (₹ purchase cost), and Total Retail MRP (₹ selling price).
+  - **Parts Table**: Detailed listing with OEM Part #, Description, Brand, Compatibility, Supplier Discount %, Cost Price, MRP, Stock Level, and formatted `Entry Date` column.
 
 ### 7.5 Mechanic Module (`MechanicsView.tsx`)
 - **Partner Registry**: Table of affiliated workshops (garage name, proprietor name, contact mobile).

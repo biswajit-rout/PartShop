@@ -95,7 +95,10 @@ class SupplierService:
     async def get_supplier_response(self, supplier_id: int) -> SupplierResponse:
         """Fetch single supplier response with brand discounts and part counts."""
         s = await self.get_supplier_by_id(supplier_id)
-        parts_count_stmt = select(func.count(SparePart.id)).where(SparePart.supplier_id == supplier_id)
+        parts_count_stmt = select(func.count(SparePart.id)).where(
+            SparePart.supplier_id == supplier_id,
+            SparePart.is_deleted == False
+        )
         count_res = await self.db.execute(parts_count_stmt)
         parts_count = count_res.scalar_one() or 0
 
@@ -248,14 +251,20 @@ class SupplierService:
         """Fetch all spare parts mapped to a specific supplier with pagination."""
         await self.get_supplier_by_id(supplier_id)
 
-        count_stmt = select(func.count(SparePart.id)).where(SparePart.supplier_id == supplier_id)
+        count_stmt = select(func.count(SparePart.id)).where(
+            SparePart.supplier_id == supplier_id,
+            SparePart.is_deleted == False
+        )
         count_res = await self.db.execute(count_stmt)
         total = count_res.scalar_one() or 0
 
         stmt = (
             select(SparePart)
-            .where(SparePart.supplier_id == supplier_id)
-            .order_by(SparePart.item_name.asc())
+            .where(
+                SparePart.supplier_id == supplier_id,
+                SparePart.is_deleted == False
+            )
+            .order_by(SparePart.created_at.desc(), SparePart.item_name.asc())
             .offset(skip)
             .limit(limit)
         )

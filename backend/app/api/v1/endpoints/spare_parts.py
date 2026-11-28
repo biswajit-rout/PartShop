@@ -13,6 +13,10 @@ from app.schemas.spare_part import (
     SparePartBatchConfirmRequest,
     SparePartSingleConfirmRequest,
     BatchConfirmResponse,
+    SparePartBatchDeleteRequest,
+    BatchDeleteResponse,
+    SparePartBatchRestoreRequest,
+    BatchRestoreResponse,
 )
 from app.services.inventory_service import InventoryService
 from app.api.deps import get_current_user, require_role
@@ -61,6 +65,8 @@ async def list_spare_parts(
         False, description="Filter only items below min stock threshold"),
     is_confirmed: bool | None = Query(
         None, description="Filter by confirmation status (True=confirmed, False=unconfirmed staging)"),
+    is_deleted: bool = Query(
+        False, description="Filter soft-deleted items (True=Recycle Bin, False=Active Catalog)"),
     skip: int = Query(0, ge=0, description="Pagination offset"),
     limit: int = Query(50, ge=1, le=500, description="Page size limit"),
 ):
@@ -72,6 +78,7 @@ async def list_spare_parts(
         supplier_id=supplier_id,
         low_stock_only=low_stock_only,
         is_confirmed=is_confirmed,
+        is_deleted=is_deleted,
         skip=skip,
         limit=limit,
     )
@@ -100,6 +107,46 @@ async def confirm_parts_batch(
         "confirmed_count": count,
         "part_ids": ids,
         "message": f"Successfully confirmed {count} spare part(s).",
+    }
+
+
+# 2.6 Batch Delete Parts (Soft Delete)
+@router.post(
+    "/delete-batch",
+    response_model=BatchDeleteResponse,
+    dependencies=[Depends(require_role([UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
+)
+async def delete_parts_batch(
+    payload: SparePartBatchDeleteRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Multi-select soft delete spare parts to the recycle bin."""
+    service = InventoryService(db)
+    count, ids = await service.delete_parts_batch(payload.part_ids)
+    return {
+        "deleted_count": count,
+        "part_ids": ids,
+        "message": f"Successfully moved {count} spare part(s) to Recycle Bin.",
+    }
+
+
+# 2.7 Batch Restore Parts (From Recycle Bin)
+@router.post(
+    "/restore-batch",
+    response_model=BatchRestoreResponse,
+    dependencies=[Depends(require_role([UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
+)
+async def restore_parts_batch(
+    payload: SparePartBatchRestoreRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Multi-select restore soft-deleted parts back to active catalog."""
+    service = InventoryService(db)
+    count, ids = await service.restore_parts_batch(payload.part_ids)
+    return {
+        "restored_count": count,
+        "part_ids": ids,
+        "message": f"Successfully restored {count} spare part(s) from Recycle Bin.",
     }
 
 
@@ -177,3 +224,35 @@ async def confirm_single_part(
     service = InventoryService(db)
     rack = payload.rack_number if payload else None
     return await service.confirm_single_part(part_id, rack_number=rack)
+
+
+# 8. Soft Delete Part (Admin, Store Manager & Counter Staff)
+@router.delete(
+    "/{part_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_role(
+        [UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
+)
+async def delete_spare_part(
+    part_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Soft delete spare part: moves to recycle bin without deleting sales history."""
+    service = InventoryService(db)
+    await service.delete_part(part_id)
+
+
+# 9. Restore Soft-Deleted Part
+@router.post(
+    "/{part_id}/restore",
+    response_model=SparePartResponse,
+    dependencies=[Depends(require_role(
+        [UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
+)
+async def restore_spare_part(
+    part_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Restore soft-deleted spare part from recycle bin back into catalog."""
+    service = InventoryService(db)
+    return await service.restore_part(part_id)

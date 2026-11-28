@@ -397,3 +397,64 @@ flowchart TD
   - `GET /api/v1/parts?is_confirmed=true/false`: Filter catalog by confirmation state.
   - `POST /api/v1/parts/confirm-batch`: Batch confirmation endpoint.
   - `POST /api/v1/parts/{part_id}/confirm`: Single part confirm with optional rack assignment.
+
+---
+
+## 14. Soft Deletion, Recycle Bin & Sales Integrity Engine
+
+### 14.1 Soft Delete & Audit Preservation Pattern
+To ensure past sales records and invoice audit trails are never broken by deleting parts, spare parts utilize soft deletion:
+- Parts are flagged with `is_deleted = True` and timestamped with `deleted_at = NOW()`.
+- Foreign keys in `sale_items` remain valid and intact.
+- Soft-deleted items are isolated in a dedicated Recycle Bin tab and excluded from active catalog listings and searches.
+
+```mermaid
+flowchart TD
+    subgraph StagingOrActive["Inventory Catalog (Confirmed or Unconfirmed)"]
+        Item["SparePart Record"]
+        DelAction["Single or Bulk Delete Action"]
+    end
+
+    subgraph SoftDeleteOp["Soft Deletion Logic"]
+        SetDeleted["Set is_deleted = True<br/>Set deleted_at = NOW()"]
+        RecycleBin["Recycle Bin Sub-Tab<br/>GET /api/v1/parts?is_deleted=true"]
+    end
+
+    subgraph SecurityGuards["POS & Inventory Integrity Guards"]
+        CheckoutGuard["BillingService.process_checkout()<br/>Blocks if is_confirmed=False or is_deleted=True (HTTP 400)"]
+        UpdateInvGuard["BillingService.update_invoice()<br/>Blocks if is_confirmed=False or is_deleted=True (HTTP 400)"]
+        RestockGuard["InventoryService.restock_part()<br/>Blocks if is_confirmed=False or is_deleted=True (HTTP 400)"]
+    end
+
+    subgraph RestoreOp["Restoration Logic"]
+        RestoreAction["Single or Bulk Restore Action"]
+        ClearDeleted["Set is_deleted = False<br/>Set deleted_at = NULL"]
+    end
+
+    Item --> DelAction
+    DelAction --> SetDeleted
+    SetDeleted --> RecycleBin
+    RecycleBin --> RestoreAction
+    RestoreAction --> ClearDeleted
+    ClearDeleted --> Item
+
+    Item -.->|Billing Attempt| CheckoutGuard
+    Item -.->|Restock Attempt| RestockGuard
+```
+
+### 14.2 Key Components
+- **Model**: `app/models/spare_part.py` (`is_deleted` indexed boolean column, default `False`, and `deleted_at` nullable timestamptz).
+- **Repository**: `app/repositories/spare_part_repo.py` (`search_parts` supporting `is_deleted: bool = False`, `get_by_barcode` and `get_by_part_number` with `include_deleted: bool = False`).
+- **Service Layer**:
+  - `InventoryService.delete_part(part_id: int)`: Soft deletes individual part.
+  - `InventoryService.delete_parts_batch(part_ids: list[int])`: Atomic batch soft delete.
+  - `InventoryService.restore_part(part_id: int)`: Restores individual part to active catalog.
+  - `InventoryService.restore_parts_batch(part_ids: list[int])`: Atomic batch restore.
+  - `BillingService.process_checkout()`: Validates that every part in the basket is confirmed and not deleted.
+  - `SupplierService.get_supplier_parts()`: Excludes soft-deleted parts and orders by `created_at DESC` for daily inward analysis.
+- **API Endpoints**:
+  - `DELETE /api/v1/parts/{part_id}`: Soft delete single part.
+  - `POST /api/v1/parts/delete-batch`: Batch soft delete.
+  - `POST /api/v1/parts/{part_id}/restore`: Restore single part.
+  - `POST /api/v1/parts/restore-batch`: Batch restore.
+  - `GET /api/v1/parts?is_deleted=true`: Query Recycle Bin.

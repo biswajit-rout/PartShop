@@ -90,6 +90,22 @@ class BillingService:
                     detail=f"Spare part ID {item.spare_part_id} does not exist.",
                 )
 
+            # Prevent selling deleted or unconfirmed parts
+            if part.is_deleted:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot sell deleted part '{part.item_name}' (Part #{part.part_number}).",
+                )
+
+            if not part.is_confirmed:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Cannot sell unconfirmed part '{part.item_name}' (Part #{part.part_number}). "
+                        f"Please verify and confirm this item in Inventory before billing."
+                    ),
+                )
+
             # Strict stock availability check
             if part.quantity < item.quantity:
                 raise HTTPException(

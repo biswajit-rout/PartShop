@@ -20,6 +20,9 @@ export interface BackendSparePart {
   mechanic_discount?: string | number;
   barcode?: string | null;
   is_confirmed?: boolean;
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+  created_at?: string | null;
 }
 
 export interface PaginatedPartsResponse {
@@ -59,6 +62,9 @@ export function mapBackendPartToFrontend(part: BackendSparePart): SparePart {
     status,
     barcode: part.barcode || "",
     isConfirmed: part.is_confirmed !== false,
+    isDeleted: Boolean(part.is_deleted),
+    deletedAt: part.deleted_at || undefined,
+    createdAt: part.created_at || undefined,
   };
 }
 
@@ -70,7 +76,8 @@ export const partsApi = {
     search?: string,
     brand?: string,
     supplierId?: number | string,
-    isConfirmed?: boolean
+    isConfirmed?: boolean,
+    isDeleted?: boolean
   ): Promise<SparePart[]> {
     const data = await apiClient<PaginatedPartsResponse>("/parts", {
       params: {
@@ -78,6 +85,7 @@ export const partsApi = {
         brand: brand && brand !== "All" ? brand : undefined,
         supplier_id: supplierId && supplierId !== "All" ? supplierId : undefined,
         is_confirmed: isConfirmed !== undefined ? String(isConfirmed) : undefined,
+        is_deleted: isDeleted !== undefined ? String(isDeleted) : undefined,
         limit: 500,
       },
       cache: "no-store",
@@ -177,5 +185,37 @@ export const partsApi = {
       body: JSON.stringify({ rack_number: rackNumber }),
     });
     return mapBackendPartToFrontend(data);
+  },
+
+  /**
+   * Batch soft-delete spare parts into the recycle bin.
+   */
+  async deleteBatch(partIds: (number | string)[]): Promise<{ deleted_count: number; part_ids: number[] }> {
+    const numericIds = partIds.map((id) => (typeof id === "string" ? parseInt(id, 10) : id));
+    return await apiClient<{ deleted_count: number; part_ids: number[] }>("/parts/delete-batch", {
+      method: "POST",
+      body: JSON.stringify({ part_ids: numericIds }),
+    });
+  },
+
+  /**
+   * Restore a soft-deleted spare part from the recycle bin.
+   */
+  async restore(id: number | string): Promise<SparePart> {
+    const data = await apiClient<BackendSparePart>(`/parts/${id}/restore`, {
+      method: "POST",
+    });
+    return mapBackendPartToFrontend(data);
+  },
+
+  /**
+   * Batch restore soft-deleted spare parts from the recycle bin.
+   */
+  async restoreBatch(partIds: (number | string)[]): Promise<{ restored_count: number; part_ids: number[] }> {
+    const numericIds = partIds.map((id) => (typeof id === "string" ? parseInt(id, 10) : id));
+    return await apiClient<{ restored_count: number; part_ids: number[] }>("/parts/restore-batch", {
+      method: "POST",
+      body: JSON.stringify({ part_ids: numericIds }),
+    });
   },
 };

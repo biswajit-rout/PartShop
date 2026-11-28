@@ -53,6 +53,8 @@ erDiagram
         varchar barcode UK "Indexed"
         varchar qr_code
         boolean is_confirmed "Indexed"
+        boolean is_deleted "Indexed, default false"
+        timestamptz deleted_at "Nullable"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -214,6 +216,8 @@ Stores the inventory catalog, pricing tiers, barcodes, and bin/rack locations.
 | `barcode` | `VARCHAR(100)` | `UNIQUE`, `NULLABLE`, `INDEXED` | Scannable POS barcode |
 | `qr_code` | `VARCHAR(255)` | `NULLABLE` | QR Code locator identifier |
 | `is_confirmed` | `BOOLEAN` | `NOT NULL`, Default: `TRUE`, `INDEXED` | Confirmation staging flag (False=unconfirmed bulk upload) |
+| `is_deleted` | `BOOLEAN` | `NOT NULL`, Default: `FALSE`, `INDEXED` | Soft delete flag (True=moved to Recycle Bin, hidden from sales) |
+| `deleted_at` | `TIMESTAMPTZ` | `NULLABLE` | Timestamp when part was soft-deleted (UTC) |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Record creation timestamp (UTC) |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Automatic update timestamp (UTC) |
 
@@ -362,6 +366,7 @@ Multi-brand wholesale purchase discount matrix per distributor (Migration: `b8e4
 2. **Brand & Filter Queries**: `spare_parts.brand_name` is indexed to accelerate sidebar catalog filtering in the POS view.
 3. **Authentication Queries**: `users.username` and `users.email` have unique B-tree indexes for fast credential lookups during cashier sign-in.
 4. **Catalog Confirmation Staging Queries**: `spare_parts.is_confirmed` has a B-tree index (`ix_spare_parts_is_confirmed`) to rapidly separate confirmed catalog parts from staging queue bulk imports without scanning the full table.
+5. **Soft Delete & Recycle Bin Queries**: `spare_parts.is_deleted` has a B-tree index (`ix_spare_parts_is_deleted`) to instantly filter out soft-deleted items from live searches and isolate Recycle Bin items.
 
 ---
 
@@ -374,3 +379,4 @@ Multi-brand wholesale purchase discount matrix per distributor (Migration: `b8e4
 | `e7c2a1f4b89d` | Daily shop operational expenditures | `expenses` |
 | `c9d5e2f1a8b4` | Invoice cancellation, voiding & return audit | `sales.status`, `sales.cancellation_reason`, `sales.cancelled_at` |
 | `d1e8f3a5b7c9` | Spare parts confirmation & staging queue | `spare_parts.is_confirmed` (boolean, default true, indexed) |
+| `e2a3b4c5d6e7` | Spare parts soft delete & recycle bin audit | `spare_parts.is_deleted` (boolean, default false, indexed), `spare_parts.deleted_at` (timestamptz) |

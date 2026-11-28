@@ -156,6 +156,7 @@ Fast paginated catalog search by item name, part number, compatible motorcycle m
   - `brand` (string, optional): Filter by brand (e.g. `Hero`, `Bajaj`, `Honda`).
   - `low_stock_only` (boolean, optional, default: `false`): Filter items where `quantity <= min_stock_alert`.
   - `is_confirmed` (boolean, optional): Filter by confirmation status (`true` for confirmed catalog, `false` for unconfirmed staging queue).
+  - `is_deleted` (boolean, optional, default: `false`): Filter by soft-deletion status (`false` for active/confirmed parts, `true` for Recycle Bin items).
   - `skip` (integer, default: `0`): Pagination offset.
   - `limit` (integer, default: `50`, max: `500`): Page size.
 - **Response (`200 OK`)**:
@@ -241,7 +242,7 @@ Quickly restocks an existing spare part from shipment delivery or inward scan: i
 - **Response (`200 OK`)**: Updated `SparePartResponse` object with incremented `quantity`.
 - **Error Codes**:
   - `404 Not Found`: Spare part with ID not found.
-  - `400 Bad Request`: Invalid quantity to add.
+  - `400 Bad Request`: Invalid quantity to add, or attempt to restock an unconfirmed (`is_confirmed = False`) or deleted (`is_deleted = True`) part.
 
 ---
 
@@ -285,6 +286,80 @@ Validates and confirms an individual spare part, optionally updating or assignin
 - **Response (`200 OK`)**: Updated `SparePartResponse` object with `is_confirmed: true` and updated `rack_number`.
 - **Error Codes**:
   - `404 Not Found`: Part ID not found.
+
+---
+
+### 3.8 Soft Delete Spare Part
+Moves an individual spare part to the Recycle Bin (`is_deleted = True`, `deleted_at = NOW()`). The part is preserved in the database to maintain foreign key integrity for past sales and invoice line items, but is removed from active counter sales and searches.
+
+- **Method**: `DELETE`
+- **Route**: `/api/v1/parts/{part_id}`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Response (`204 No Content`)**: Empty response body on successful soft-deletion.
+- **Error Codes**:
+  - `404 Not Found`: Part ID not found or already deleted.
+
+---
+
+### 3.9 Batch Soft Delete Spare Parts
+Multi-select soft delete multiple spare parts in a single atomic request (e.g., removing erroneous bulk uploads).
+
+- **Method**: `POST`
+- **Route**: `/api/v1/parts/delete-batch`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SparePartBatchDeleteRequest`)**:
+  ```json
+  {
+    "part_ids": [101, 102, 105]
+  }
+  ```
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "deleted_count": 3,
+    "part_ids": [101, 102, 105],
+    "message": "Successfully moved 3 spare part(s) to Recycle Bin."
+  }
+  ```
+- **Error Codes**:
+  - `401 Unauthorized`: Missing or invalid credentials.
+
+---
+
+### 3.10 Restore Soft-Deleted Spare Part
+Restores a spare part from the Recycle Bin back to active inventory (`is_deleted = False`, `deleted_at = null`).
+
+- **Method**: `POST`
+- **Route**: `/api/v1/parts/{part_id}/restore`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Response (`200 OK`)**: Restored `SparePartResponse` object with `is_deleted: false`.
+- **Error Codes**:
+  - `404 Not Found`: Part ID not found in database.
+
+---
+
+### 3.11 Batch Restore Spare Parts
+Multi-select restore multiple soft-deleted spare parts from the Recycle Bin back to active inventory.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/parts/restore-batch`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SparePartBatchRestoreRequest`)**:
+  ```json
+  {
+    "part_ids": [101, 102, 105]
+  }
+  ```
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "restored_count": 3,
+    "part_ids": [101, 102, 105],
+    "message": "Successfully restored 3 spare part(s) from Recycle Bin."
+  }
+  ```
+- **Error Codes**:
+  - `401 Unauthorized`: Missing or invalid credentials.
 
 ---
 

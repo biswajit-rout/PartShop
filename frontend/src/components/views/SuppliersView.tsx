@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Supplier, SparePart, Brand } from "@/types";
 import { formatRupees } from "@/utils/formatters";
 import { matchSearchTokens } from "@/utils/search";
@@ -27,6 +27,7 @@ import {
   Percent,
   FileSpreadsheet,
   Layers,
+  Calendar,
 } from "lucide-react";
 
 interface SuppliersViewProps {
@@ -64,6 +65,7 @@ export default function SuppliersView({ onRefreshCatalog }: SuppliersViewProps) 
   const [supplierParts, setSupplierParts] = useState<SparePart[]>([]);
   const [isLoadingParts, setIsLoadingParts] = useState(false);
   const [partsSearchQuery, setPartsSearchQuery] = useState("");
+  const [partsDateFilter, setPartsDateFilter] = useState<string>("All");
 
   // Upload Excel Under Specific Supplier Modal States
   const [uploadSupplier, setUploadSupplier] = useState<Supplier | null>(null);
@@ -223,6 +225,7 @@ export default function SuppliersView({ onRefreshCatalog }: SuppliersViewProps) 
   const handleOpenPartsModal = async (supplier: Supplier) => {
     setViewingSupplier(supplier);
     setPartsSearchQuery("");
+    setPartsDateFilter("All");
     setIsLoadingParts(true);
     try {
       const parts = await suppliersApi.getSupplierParts(supplier.id);
@@ -277,11 +280,45 @@ export default function SuppliersView({ onRefreshCatalog }: SuppliersViewProps) 
     }
   };
 
-  // Parts filtered by search inside viewing modal
-  const filteredSupplierParts = supplierParts.filter((p) => {
-    const target = `${p.name} ${p.partNumber} ${p.brand} ${p.compatibleBikes} ${p.modelNumber} ${p.rackNumber}`;
-    return matchSearchTokens(target, partsSearchQuery);
-  });
+  // Group and sort available entry dates for the viewed supplier
+  const availableEntryDates = useMemo(() => {
+    const datesMap = new Map<string, number>();
+    supplierParts.forEach((p) => {
+      const d = p.createdAt ? p.createdAt.split("T")[0] : "Earlier / Untracked";
+      datesMap.set(d, (datesMap.get(d) || 0) + 1);
+    });
+    return Array.from(datesMap.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  }, [supplierParts]);
+
+  // Parts filtered by search AND entry date inside viewing modal
+  const filteredSupplierParts = useMemo(() => {
+    return supplierParts.filter((p) => {
+      const entryDate = p.createdAt ? p.createdAt.split("T")[0] : "Earlier / Untracked";
+      if (partsDateFilter !== "All" && entryDate !== partsDateFilter) {
+        return false;
+      }
+      const target = `${p.name} ${p.partNumber} ${p.brand} ${p.compatibleBikes} ${p.modelNumber} ${p.rackNumber}`;
+      return matchSearchTokens(target, partsSearchQuery);
+    });
+  }, [supplierParts, partsDateFilter, partsSearchQuery]);
+
+  // Daily / Filtered Stock Valuation Metrics
+  const supplierStockMetrics = useMemo(() => {
+    const totalQty = filteredSupplierParts.reduce((acc, p) => acc + (p.quantity || 0), 0);
+    const totalCostValue = filteredSupplierParts.reduce(
+      (acc, p) => acc + (p.purchasePrice || 0) * (p.quantity || 0),
+      0
+    );
+    const totalRetailValue = filteredSupplierParts.reduce(
+      (acc, p) => acc + (p.sellingPrice || 0) * (p.quantity || 0),
+      0
+    );
+    return {
+      totalQty,
+      totalCostValue,
+      totalRetailValue,
+    };
+  }, [filteredSupplierParts]);
 
   const totalCatalogSupplied = suppliers.reduce((acc, s) => acc + (s.totalPartsCount || 0), 0);
 
@@ -743,19 +780,77 @@ export default function SuppliersView({ onRefreshCatalog }: SuppliersViewProps) 
               </button>
             </div>
 
-            {/* Search Filter Inside Parts */}
-            <div className="relative shrink-0">
-              <Search
-                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
-                size={15}
-              />
-              <input
-                type="text"
-                value={partsSearchQuery}
-                onChange={(e) => setPartsSearchQuery(e.target.value)}
-                placeholder="Search supplied parts by description, part #, model, bike model, or rack..."
-                className="glass-input h-9 w-full pl-9 pr-4 rounded-xl text-xs font-sans"
-              />
+            {/* Search Filter & Date Filter Controls */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
+              <div className="relative flex-1">
+                <Search
+                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+                  size={15}
+                />
+                <input
+                  type="text"
+                  value={partsSearchQuery}
+                  onChange={(e) => setPartsSearchQuery(e.target.value)}
+                  placeholder="Search supplied parts by description, part #, model, bike model, or rack..."
+                  className="glass-input h-9 w-full pl-9 pr-4 rounded-xl text-xs font-sans"
+                />
+              </div>
+
+              {/* Date Filter Dropdown */}
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                  <select
+                    value={partsDateFilter}
+                    onChange={(e) => setPartsDateFilter(e.target.value)}
+                    className="glass-input h-9 pl-8 pr-3 rounded-xl text-xs font-mono text-slate-200 outline-none cursor-pointer"
+                  >
+                    <option value="All" className="bg-slate-900">All Entry Dates ({supplierParts.length} parts)</option>
+                    {availableEntryDates.map(([dateStr, count]) => (
+                      <option key={dateStr} value={dateStr} className="bg-slate-900">
+                        {dateStr} ({count} items)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {partsDateFilter !== "All" && (
+                  <button
+                    type="button"
+                    onClick={() => setPartsDateFilter("All")}
+                    className="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 text-xs font-mono transition-colors cursor-pointer"
+                  >
+                    Reset Date
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Daily Inward Stock Valuation & Quantity Banner */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 shrink-0">
+              <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/10">
+                <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Filtered SKUs</div>
+                <div className="text-base font-bold text-white font-mono mt-0.5">{filteredSupplierParts.length} items</div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-sky-500/10 border border-sky-400/20">
+                <div className="text-[10px] font-mono text-sky-400 uppercase tracking-wider">Total Quantity</div>
+                <div className="text-base font-bold text-sky-300 font-mono mt-0.5">{supplierStockMetrics.totalQty} units</div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-400/20">
+                <div className="text-[10px] font-mono text-emerald-400 uppercase tracking-wider">
+                  Stock Cost Valuation
+                </div>
+                <div className="text-base font-bold text-emerald-300 font-mono mt-0.5">
+                  {formatRupees(supplierStockMetrics.totalCostValue)}
+                </div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-400/20">
+                <div className="text-[10px] font-mono text-purple-400 uppercase tracking-wider">
+                  Retail Valuation (MRP)
+                </div>
+                <div className="text-base font-bold text-purple-300 font-mono mt-0.5">
+                  {formatRupees(supplierStockMetrics.totalRetailValue)}
+                </div>
+              </div>
             </div>
 
             {/* Parts Table */}
@@ -767,12 +862,15 @@ export default function SuppliersView({ onRefreshCatalog }: SuppliersViewProps) 
                 </div>
               ) : filteredSupplierParts.length === 0 ? (
                 <div className="p-10 text-center text-slate-400 text-xs">
-                  No parts found for this supplier. Use "Upload Bill" to import items under {viewingSupplier.name}.
+                  {partsDateFilter !== "All"
+                    ? `No parts found entered on ${partsDateFilter}. Try selecting another date or "All Entry Dates".`
+                    : `No parts found for this supplier. Use "Upload Bill" to import items under ${viewingSupplier.name}.`}
                 </div>
               ) : (
-                <table className="w-full text-left text-xs font-sans min-w-[750px]">
+                <table className="w-full text-left text-xs font-sans min-w-[850px]">
                   <thead className="bg-white/[0.04] text-slate-400 font-mono uppercase text-[10px] sticky top-0 backdrop-blur-md border-b border-white/10">
                     <tr>
+                      <th className="py-2.5 px-3">Entry Date</th>
                       <th className="py-2.5 px-3">Part # / OEM SKU</th>
                       <th className="py-2.5 px-3">Description</th>
                       <th className="py-2.5 px-3">Brand</th>
@@ -786,6 +884,9 @@ export default function SuppliersView({ onRefreshCatalog }: SuppliersViewProps) 
                   <tbody className="divide-y divide-white/5 font-sans">
                     {filteredSupplierParts.map((item) => (
                       <tr key={item.id} className="hover:bg-white/[0.02]">
+                        <td className="py-2.5 px-3 font-mono text-[11px] text-slate-400 whitespace-nowrap">
+                          {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : "Earlier"}
+                        </td>
                         <td className="py-2.5 px-3 font-mono font-semibold text-sky-400">
                           {item.partNumber}
                         </td>

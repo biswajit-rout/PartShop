@@ -1,6 +1,6 @@
 from decimal import Decimal
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.spare_part import SparePart
@@ -103,10 +103,10 @@ class InventoryService:
 
         return created
 
-    async def get_part_by_id(self, part_id: int) -> SparePart:
+    async def get_part_by_id(self, part_id: int, include_deleted: bool = False) -> SparePart:
         """Fetch part by ID or raise HTTP 404."""
         part = await self.repo.get_by_id(part_id)
-        if not part:
+        if not part or (not include_deleted and part.is_deleted):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Spare part with ID {part_id} not found.",
@@ -130,6 +130,7 @@ class InventoryService:
         supplier_id: int | None = None,
         low_stock_only: bool = False,
         is_confirmed: bool | None = None,
+        is_deleted: bool = False,
         skip: int = 0,
         limit: int = 50,
     ) -> tuple[list[SparePart], int]:
@@ -140,6 +141,7 @@ class InventoryService:
             supplier_id=supplier_id,
             low_stock_only=low_stock_only,
             is_confirmed=is_confirmed,
+            is_deleted=is_deleted,
             skip=skip,
             limit=limit,
         )
@@ -223,9 +225,50 @@ class InventoryService:
         return part
 
     async def delete_part(self, part_id: int) -> None:
-        """Delete part from inventory."""
+        """Soft delete part from active inventory, preserving historical sales audit and moving to recycle bin."""
         part = await self.get_part_by_id(part_id)
-        await self.repo.delete(part)
+        part.is_deleted = True
+        part.deleted_at = func.now()
+        await self.db.commit()
+
+    async def delete_parts_batch(self, part_ids: list[int]) -> tuple[int, list[int]]:
+        """Batch soft-delete parts into recycle bin."""
+        if not part_ids:
+            return 0, []
+        stmt = select(SparePart).where(SparePart.id.in_(part_ids), SparePart.is_deleted == False)
+        res = await self.db.execute(stmt)
+        parts = list(res.scalars().all())
+        deleted_ids = []
+        for p in parts:
+            p.is_deleted = True
+            p.deleted_at = func.now()
+            deleted_ids.append(p.id)
+        await self.db.commit()
+        return len(deleted_ids), deleted_ids
+
+    async def restore_part(self, part_id: int) -> SparePart:
+        """Restore a soft-deleted part back to active inventory."""
+        part = await self.get_part_by_id(part_id, include_deleted=True)
+        part.is_deleted = False
+        part.deleted_at = None
+        await self.db.commit()
+        await self.db.refresh(part)
+        return part
+
+    async def restore_parts_batch(self, part_ids: list[int]) -> tuple[int, list[int]]:
+        """Batch restore soft-deleted parts back to inventory."""
+        if not part_ids:
+            return 0, []
+        stmt = select(SparePart).where(SparePart.id.in_(part_ids), SparePart.is_deleted == True)
+        res = await self.db.execute(stmt)
+        parts = list(res.scalars().all())
+        restored_ids = []
+        for p in parts:
+            p.is_deleted = False
+            p.deleted_at = None
+            restored_ids.append(p.id)
+        await self.db.commit()
+        return len(restored_ids), restored_ids
 
     async def restock_part(self, part_id: int, restock_data: SparePartRestock) -> SparePart:
         """
@@ -234,6 +277,18 @@ class InventoryService:
         and logs a PURCHASE_IN immutable stock movement audit entry.
         """
         part = await self.get_part_by_id(part_id)
+
+        if part.is_deleted:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot restock deleted part '{part.item_name}'. Restore it from the Recycle Bin first.",
+            )
+
+        if not part.is_confirmed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot restock unconfirmed part '{part.item_name}'. Please verify and confirm this item in Inventory before restocking.",
+            )
 
         if restock_data.quantity_to_add <= 0:
             raise HTTPException(

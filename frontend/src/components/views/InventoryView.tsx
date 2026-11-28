@@ -39,6 +39,9 @@ import {
   CheckSquare,
   Square,
   CheckCheck,
+  Trash2,
+  Archive,
+  RefreshCw,
 } from "lucide-react";
 
 interface InventoryViewProps {
@@ -58,10 +61,15 @@ export default function InventoryView({
   const [selectedStatus, setSelectedStatus] = useState<string>("All");
   const [selectedSupplier, setSelectedSupplier] = useState<string>("All");
 
-  // Sub-Tab Navigation: Confirmed vs Unconfirmed Staging
-  const [activeInventoryTab, setActiveInventoryTab] = useState<"confirmed" | "unconfirmed">("confirmed");
+  // Sub-Tab Navigation: Confirmed vs Unconfirmed Staging vs Recycle Bin
+  const [activeInventoryTab, setActiveInventoryTab] = useState<"confirmed" | "unconfirmed" | "deleted">("confirmed");
   const [selectedUnconfirmedIds, setSelectedUnconfirmedIds] = useState<Set<string>>(new Set());
+  const [selectedDeletedIds, setSelectedDeletedIds] = useState<Set<string>>(new Set());
+  const [deletedProducts, setDeletedProducts] = useState<SparePart[]>([]);
+  const [isLoadingDeleted, setIsLoadingDeleted] = useState(false);
   const [isConfirmingBulk, setIsConfirmingBulk] = useState(false);
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
+  const [isRestoringBulk, setIsRestoringBulk] = useState(false);
   const [confirmToast, setConfirmToast] = useState<string | null>(null);
 
   // Quick Rack Assignment & Single Confirmation Modal
@@ -219,15 +227,37 @@ export default function InventoryView({
     }
   };
 
-  // Total counts for confirmed and unconfirmed sub-tabs
-  const confirmedCount = products.filter((p) => p.isConfirmed !== false).length;
-  const unconfirmedCount = products.filter((p) => p.isConfirmed === false).length;
+  // Fetch soft-deleted parts for the Recycle Bin tab
+  const loadDeletedParts = async () => {
+    setIsLoadingDeleted(true);
+    try {
+      const deleted = await partsApi.getAll(undefined, undefined, undefined, undefined, true);
+      setDeletedProducts(deleted);
+    } catch (err) {
+      console.warn("Could not load deleted parts from backend:", err);
+    } finally {
+      setIsLoadingDeleted(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDeletedParts();
+  }, []);
+
+  // Total counts for confirmed, unconfirmed, and deleted sub-tabs
+  const confirmedCount = products.filter((p) => p.isConfirmed !== false && !p.isDeleted).length;
+  const unconfirmedCount = products.filter((p) => p.isConfirmed === false && !p.isDeleted).length;
+  const deletedCount = deletedProducts.length;
+
+  // Active source list depends on whether user is viewing the Recycle Bin
+  const activeSourceList = activeInventoryTab === "deleted" ? deletedProducts : products;
 
   // Tokenized multi-attribute search filter with automotive synonym expansion & supplier filter
-  const filteredProducts = products.filter((item) => {
+  const filteredProducts = activeSourceList.filter((item) => {
     // Sub-tab partition
-    if (activeInventoryTab === "confirmed" && item.isConfirmed === false) return false;
-    if (activeInventoryTab === "unconfirmed" && item.isConfirmed !== false) return false;
+    if (activeInventoryTab === "confirmed" && (item.isConfirmed === false || item.isDeleted)) return false;
+    if (activeInventoryTab === "unconfirmed" && (item.isConfirmed !== false || item.isDeleted)) return false;
+    if (activeInventoryTab === "deleted" && !item.isDeleted) return false;
 
     const searchTarget = `${item.name} ${item.brand} ${item.partNumber} ${item.modelNumber} ${item.compatibleBikes} ${item.rackNumber} ${item.barcode} ${item.supplierName || ""}`;
     const matchesSearch = matchSearchTokens(searchTarget, searchQuery);
@@ -242,33 +272,48 @@ export default function InventoryView({
     return matchesSearch && matchesBrand && matchesStatus && matchesSupplier;
   });
 
-  // Multi-select handlers for unconfirmed items
+  // Multi-select handlers for unconfirmed and deleted items
   const toggleSelectPart = (id: string) => {
-    setSelectedUnconfirmedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const isAllVisibleSelected =
-    filteredProducts.length > 0 &&
-    filteredProducts.every((p) => selectedUnconfirmedIds.has(p.id));
-
-  const toggleSelectAllVisible = () => {
-    if (isAllVisibleSelected) {
-      setSelectedUnconfirmedIds((prev) => {
+    if (activeInventoryTab === "deleted") {
+      setSelectedDeletedIds((prev) => {
         const next = new Set(prev);
-        filteredProducts.forEach((p) => next.delete(p.id));
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
         return next;
       });
     } else {
       setSelectedUnconfirmedIds((prev) => {
         const next = new Set(prev);
-        filteredProducts.forEach((p) => next.add(p.id));
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
         return next;
       });
+    }
+  };
+
+  const isAllVisibleSelected =
+    filteredProducts.length > 0 &&
+    (activeInventoryTab === "deleted"
+      ? filteredProducts.every((p) => selectedDeletedIds.has(p.id))
+      : filteredProducts.every((p) => selectedUnconfirmedIds.has(p.id)));
+
+  const toggleSelectAllVisible = () => {
+    if (activeInventoryTab === "deleted") {
+      if (isAllVisibleSelected) {
+        setSelectedDeletedIds(new Set());
+      } else {
+        const next = new Set(selectedDeletedIds);
+        filteredProducts.forEach((p) => next.add(p.id));
+        setSelectedDeletedIds(next);
+      }
+    } else {
+      if (isAllVisibleSelected) {
+        setSelectedUnconfirmedIds(new Set());
+      } else {
+        const next = new Set(selectedUnconfirmedIds);
+        filteredProducts.forEach((p) => next.add(p.id));
+        setSelectedUnconfirmedIds(next);
+      }
     }
   };
 
@@ -281,9 +326,7 @@ export default function InventoryView({
       const res = await partsApi.confirmParts(ids);
       setConfirmToast(`Successfully confirmed ${res.confirmed_count} part(s)! Moved to active catalog.`);
       setSelectedUnconfirmedIds(new Set());
-      if (onRefreshCatalog) {
-        onRefreshCatalog();
-      }
+      if (onRefreshCatalog) onRefreshCatalog();
       setTimeout(() => setConfirmToast(null), 4000);
     } catch (err: any) {
       setConfirmToast(`Failed to confirm parts: ${err.message}`);
@@ -307,15 +350,85 @@ export default function InventoryView({
       );
       setConfirmToast(`Part '${part.name}' confirmed and activated for counter sales!`);
       setQuickRackTarget(null);
-      if (onRefreshCatalog) {
-        onRefreshCatalog();
-      }
+      if (onRefreshCatalog) onRefreshCatalog();
       setTimeout(() => setConfirmToast(null), 3500);
     } catch (err: any) {
       setConfirmToast(`Failed to confirm part: ${err.message}`);
       setTimeout(() => setConfirmToast(null), 4000);
     } finally {
       setIsConfirmingSingle(false);
+    }
+  };
+
+  // Soft Delete Handlers (Single & Batch)
+  const handleSingleDelete = async (part: SparePart) => {
+    if (!confirm(`Are you sure you want to move "${part.name}" to the Recycle Bin? You can restore it later.`)) {
+      return;
+    }
+    try {
+      await partsApi.delete(part.id);
+      setConfirmToast(`Moved "${part.name}" to Recycle Bin.`);
+      if (onRefreshCatalog) onRefreshCatalog();
+      await loadDeletedParts();
+      setTimeout(() => setConfirmToast(null), 3500);
+    } catch (err: any) {
+      setConfirmToast(`Failed to delete part: ${err.message}`);
+      setTimeout(() => setConfirmToast(null), 4000);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedUnconfirmedIds.size === 0) return;
+    if (!confirm(`Move ${selectedUnconfirmedIds.size} selected part(s) to the Recycle Bin?`)) {
+      return;
+    }
+    setIsDeletingBulk(true);
+    try {
+      const ids = Array.from(selectedUnconfirmedIds);
+      const res = await partsApi.deleteBatch(ids);
+      setConfirmToast(`Moved ${res.deleted_count} part(s) to Recycle Bin.`);
+      setSelectedUnconfirmedIds(new Set());
+      if (onRefreshCatalog) onRefreshCatalog();
+      await loadDeletedParts();
+      setTimeout(() => setConfirmToast(null), 3500);
+    } catch (err: any) {
+      setConfirmToast(`Failed to delete parts: ${err.message}`);
+      setTimeout(() => setConfirmToast(null), 4000);
+    } finally {
+      setIsDeletingBulk(false);
+    }
+  };
+
+  // Restore Handlers (Single & Batch)
+  const handleSingleRestore = async (part: SparePart) => {
+    try {
+      await partsApi.restore(part.id);
+      setConfirmToast(`Restored "${part.name}" back into catalog!`);
+      if (onRefreshCatalog) onRefreshCatalog();
+      await loadDeletedParts();
+      setTimeout(() => setConfirmToast(null), 3500);
+    } catch (err: any) {
+      setConfirmToast(`Failed to restore part: ${err.message}`);
+      setTimeout(() => setConfirmToast(null), 4000);
+    }
+  };
+
+  const handleBulkRestore = async () => {
+    if (selectedDeletedIds.size === 0) return;
+    setIsRestoringBulk(true);
+    try {
+      const ids = Array.from(selectedDeletedIds);
+      const res = await partsApi.restoreBatch(ids);
+      setConfirmToast(`Restored ${res.restored_count} part(s) back into catalog!`);
+      setSelectedDeletedIds(new Set());
+      if (onRefreshCatalog) onRefreshCatalog();
+      await loadDeletedParts();
+      setTimeout(() => setConfirmToast(null), 3500);
+    } catch (err: any) {
+      setConfirmToast(`Failed to restore parts: ${err.message}`);
+      setTimeout(() => setConfirmToast(null), 4000);
+    } finally {
+      setIsRestoringBulk(false);
     }
   };
 
@@ -607,7 +720,7 @@ export default function InventoryView({
         </div>
       )}
 
-      {/* Sub-Tab Navigation: Confirmed vs Unconfirmed Staging */}
+      {/* Sub-Tab Navigation: Confirmed vs Unconfirmed Staging vs Recycle Bin */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-1.5 rounded-2xl bg-white/[0.03] border border-white/10">
         <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-950/40">
           <button
@@ -615,14 +728,15 @@ export default function InventoryView({
             onClick={() => {
               setActiveInventoryTab("confirmed");
               setSelectedUnconfirmedIds(new Set());
+              setSelectedDeletedIds(new Set());
             }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
               activeInventoryTab === "confirmed"
                 ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-lg shadow-emerald-500/10"
                 : "text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]"
             }`}
           >
-            <CheckCircle2 size={16} className={activeInventoryTab === "confirmed" ? "text-emerald-400" : "text-slate-400"} />
+            <CheckCircle2 size={15} className={activeInventoryTab === "confirmed" ? "text-emerald-400" : "text-slate-400"} />
             <span>Confirmed Items</span>
             <span
               className={`px-2 py-0.5 rounded-full text-[11px] font-mono font-bold ${
@@ -637,14 +751,18 @@ export default function InventoryView({
 
           <button
             type="button"
-            onClick={() => setActiveInventoryTab("unconfirmed")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+            onClick={() => {
+              setActiveInventoryTab("unconfirmed");
+              setSelectedUnconfirmedIds(new Set());
+              setSelectedDeletedIds(new Set());
+            }}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
               activeInventoryTab === "unconfirmed"
                 ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-lg shadow-amber-500/10"
                 : "text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]"
             }`}
           >
-            <AlertTriangle size={16} className={activeInventoryTab === "unconfirmed" ? "text-amber-400" : "text-slate-400"} />
+            <AlertTriangle size={15} className={activeInventoryTab === "unconfirmed" ? "text-amber-400" : "text-slate-400"} />
             <span>Unconfirmed / Bulk Uploads</span>
             <span
               className={`px-2 py-0.5 rounded-full text-[11px] font-mono font-bold ${
@@ -656,6 +774,33 @@ export default function InventoryView({
               {unconfirmedCount}
             </span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveInventoryTab("deleted");
+              setSelectedUnconfirmedIds(new Set());
+              setSelectedDeletedIds(new Set());
+              loadDeletedParts();
+            }}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+              activeInventoryTab === "deleted"
+                ? "bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-lg shadow-rose-500/10"
+                : "text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]"
+            }`}
+          >
+            <Trash2 size={15} className={activeInventoryTab === "deleted" ? "text-rose-400" : "text-slate-400"} />
+            <span>Recycle Bin / Deleted</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[11px] font-mono font-bold ${
+                deletedCount > 0
+                  ? "bg-rose-500/30 text-rose-200"
+                  : "bg-white/10 text-slate-400"
+              }`}
+            >
+              {deletedCount}
+            </span>
+          </button>
         </div>
 
         <div className="text-xs text-slate-400 px-3 py-1 font-mono flex items-center gap-2">
@@ -664,10 +809,15 @@ export default function InventoryView({
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               Verified Active Catalog · Ready for POS Counter Sales
             </span>
-          ) : (
+          ) : activeInventoryTab === "unconfirmed" ? (
             <span className="text-amber-400/90 flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-              Staging Queue · Verify rack numbers and multi-select to confirm
+              Staging Queue · Locked from sales & search until confirmed
+            </span>
+          ) : (
+            <span className="text-rose-400/90 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-rose-400" />
+              Recycle Bin · Soft-deleted items preserved; click Restore to reactivate
             </span>
           )}
         </div>
@@ -685,7 +835,37 @@ export default function InventoryView({
                 Unconfirmed Staging Queue ({unconfirmedCount} items awaiting verification)
               </p>
               <p className="text-slate-300 text-[11px] mt-0.5">
-                Parts imported from Excel spreadsheets land here automatically. Verify part details and assign missing Rack Locations, then select items using the checkboxes and click <strong>Confirm</strong> to activate them in the sales catalog.
+                Parts imported from Excel spreadsheets land here automatically. Verify rack numbers and click <strong>Confirm</strong> to activate, or <strong>Delete</strong> unwanted rows.
+              </p>
+            </div>
+          </div>
+          {filteredProducts.length > 0 && (
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={toggleSelectAllVisible}
+                className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 text-xs font-semibold border border-white/15 transition-colors cursor-pointer"
+              >
+                {isAllVisibleSelected ? "Deselect All Visible" : `Select All Visible (${filteredProducts.length})`}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Recycle Bin Informational Guide */}
+      {activeInventoryTab === "deleted" && (
+        <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/25 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs text-rose-200/90">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-rose-500/20 text-rose-300 shrink-0">
+              <Trash2 size={18} />
+            </div>
+            <div>
+              <p className="font-semibold text-white">
+                Recycle Bin ({deletedCount} soft-deleted items)
+              </p>
+              <p className="text-slate-300 text-[11px] mt-0.5">
+                Items here are soft-deleted from active sales, searches, and stock valuations while preserving historical invoice and audit integrity. Click <strong>Restore</strong> to return items back to the catalog.
               </p>
             </div>
           </div>
@@ -719,7 +899,7 @@ export default function InventoryView({
         </div>
       )}
 
-      {/* Multi-Select Floating Action Bar */}
+      {/* Multi-Select Floating Action Bar: Unconfirmed Queue */}
       {activeInventoryTab === "unconfirmed" && selectedUnconfirmedIds.size > 0 && (
         <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/20 via-slate-900 to-emerald-500/20 border border-amber-500/40 shadow-2xl backdrop-blur-md flex flex-wrap items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2">
           <div className="flex items-center gap-2.5">
@@ -727,7 +907,7 @@ export default function InventoryView({
               <CheckSquare size={16} />
             </div>
             <span className="text-xs font-semibold text-white">
-              <strong className="font-mono text-amber-300 text-sm">{selectedUnconfirmedIds.size}</strong> item(s) selected for validation
+              <strong className="font-mono text-amber-300 text-sm">{selectedUnconfirmedIds.size}</strong> item(s) selected
             </span>
           </div>
 
@@ -741,6 +921,15 @@ export default function InventoryView({
             </button>
             <button
               type="button"
+              onClick={handleBulkDelete}
+              disabled={isDeletingBulk}
+              className="px-3.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-bold text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all"
+            >
+              <Trash2 size={14} />
+              <span>{isDeletingBulk ? "Deleting..." : `Delete Selected (${selectedUnconfirmedIds.size})`}</span>
+            </button>
+            <button
+              type="button"
               onClick={handleBulkConfirm}
               disabled={isConfirmingBulk}
               className="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all"
@@ -748,14 +937,47 @@ export default function InventoryView({
               {isConfirmingBulk ? (
                 <>
                   <Sparkles size={14} className="animate-spin" />
-                  <span>Confirming {selectedUnconfirmedIds.size} items...</span>
+                  <span>Confirming...</span>
                 </>
               ) : (
                 <>
                   <CheckCircle2 size={14} />
-                  <span>Confirm Selected ({selectedUnconfirmedIds.size}) & Move to Catalog</span>
+                  <span>Confirm Selected ({selectedUnconfirmedIds.size})</span>
                 </>
               )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Multi-Select Floating Action Bar: Recycle Bin */}
+      {activeInventoryTab === "deleted" && selectedDeletedIds.size > 0 && (
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-rose-500/20 via-slate-900 to-emerald-500/20 border border-rose-500/40 shadow-2xl backdrop-blur-md flex flex-wrap items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-rose-500/30 text-rose-300">
+              <CheckSquare size={16} />
+            </div>
+            <span className="text-xs font-semibold text-white">
+              <strong className="font-mono text-rose-300 text-sm">{selectedDeletedIds.size}</strong> deleted item(s) selected
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedDeletedIds(new Set())}
+              className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 text-xs font-semibold transition-colors cursor-pointer"
+            >
+              Clear Selection
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkRestore}
+              disabled={isRestoringBulk}
+              className="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all"
+            >
+              <RotateCcw size={14} />
+              <span>{isRestoringBulk ? "Restoring..." : `Restore Selected (${selectedDeletedIds.size})`}</span>
             </button>
           </div>
         </div>
@@ -825,13 +1047,15 @@ export default function InventoryView({
           <table className="w-full text-left text-xs font-sans min-w-[1050px]">
             <thead className="bg-white/[0.03] text-slate-400 font-mono uppercase border-b border-white/10 text-[11px]">
               <tr>
-                {activeInventoryTab === "unconfirmed" && (
+                {(activeInventoryTab === "unconfirmed" || activeInventoryTab === "deleted") && (
                   <th className="py-3.5 px-3 w-10 text-center">
                     <input
                       type="checkbox"
                       checked={isAllVisibleSelected}
                       onChange={toggleSelectAllVisible}
-                      className="w-4 h-4 rounded cursor-pointer accent-amber-500"
+                      className={`w-4 h-4 rounded cursor-pointer ${
+                        activeInventoryTab === "deleted" ? "accent-rose-500" : "accent-amber-500"
+                      }`}
                       title="Select / Deselect all visible items"
                     />
                   </th>
@@ -851,8 +1075,21 @@ export default function InventoryView({
             <tbody className="divide-y divide-white/5 font-mono">
               {filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={activeInventoryTab === "unconfirmed" ? 11 : 10} className="py-12 text-center">
-                    {activeInventoryTab === "unconfirmed" && unconfirmedCount === 0 ? (
+                  <td
+                    colSpan={activeInventoryTab === "unconfirmed" || activeInventoryTab === "deleted" ? 11 : 10}
+                    className="py-12 text-center"
+                  >
+                    {activeInventoryTab === "deleted" && deletedProducts.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <div className="w-12 h-12 rounded-full bg-slate-800/80 flex items-center justify-center text-slate-400 mb-1">
+                          <Trash2 size={24} />
+                        </div>
+                        <p className="text-sm font-bold text-white">Recycle Bin is Empty</p>
+                        <p className="text-xs text-slate-400 max-w-sm">
+                          No deleted spare parts found. Items deleted from Confirmed or Unconfirmed inventory will appear here with option to restore.
+                        </p>
+                      </div>
+                    ) : activeInventoryTab === "unconfirmed" && unconfirmedCount === 0 ? (
                       <div className="flex flex-col items-center justify-center gap-2">
                         <div className="w-12 h-12 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 mb-1">
                           <CheckCircle2 size={26} />
@@ -876,27 +1113,39 @@ export default function InventoryView({
                     className={`hover:bg-white/[0.04] transition-colors ${
                       activeInventoryTab === "unconfirmed" && selectedUnconfirmedIds.has(item.id)
                         ? "bg-amber-500/[0.06]"
+                        : activeInventoryTab === "deleted" && selectedDeletedIds.has(item.id)
+                        ? "bg-rose-500/[0.06]"
                         : ""
                     }`}
                   >
-                    {activeInventoryTab === "unconfirmed" && (
+                    {(activeInventoryTab === "unconfirmed" || activeInventoryTab === "deleted") && (
                       <td className="py-3.5 px-3 text-center">
                         <input
                           type="checkbox"
-                          checked={selectedUnconfirmedIds.has(item.id)}
+                          checked={
+                            activeInventoryTab === "deleted"
+                              ? selectedDeletedIds.has(item.id)
+                              : selectedUnconfirmedIds.has(item.id)
+                          }
                           onChange={() => toggleSelectPart(item.id)}
-                          className="w-4 h-4 rounded cursor-pointer accent-amber-500"
+                          className={`w-4 h-4 rounded cursor-pointer ${
+                            activeInventoryTab === "deleted" ? "accent-rose-500" : "accent-amber-500"
+                          }`}
                         />
                       </td>
                     )}
                     <td className="py-3.5 px-4 font-sans">
                       <div className="font-semibold text-white flex items-center gap-2">
                         <span>{item.name}</span>
-                        {item.isConfirmed === false && (
+                        {item.isDeleted ? (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/30 font-mono font-bold">
+                            DELETED
+                          </span>
+                        ) : item.isConfirmed === false ? (
                           <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono font-bold">
                             UNCONFIRMED
                           </span>
-                        )}
+                        ) : null}
                       </div>
                       <div className="text-[11px] text-slate-400 font-mono">
                         Barcode: {item.barcode || "N/A"}
@@ -970,11 +1219,33 @@ export default function InventoryView({
                       {formatRupees(item.sellingPrice)}
                     </td>
                     <td className="py-3.5 px-4">
-                      <GlassBadge status={item.status} />
+                      {item.isDeleted ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                          Deleted
+                        </span>
+                      ) : item.isConfirmed === false ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                          Unconfirmed
+                        </span>
+                      ) : (
+                        <GlassBadge status={item.status} />
+                      )}
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        {activeInventoryTab === "unconfirmed" ? (
+                        {activeInventoryTab === "deleted" ? (
+                          <button
+                            type="button"
+                            onClick={() => handleSingleRestore(item)}
+                            className="px-2.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold border border-emerald-500/40 flex items-center gap-1 cursor-pointer transition-colors"
+                            title="Restore part to active catalog"
+                          >
+                            <RotateCcw size={13} />
+                            <span>Restore</span>
+                          </button>
+                        ) : activeInventoryTab === "unconfirmed" ? (
                           <>
                             <button
                               type="button"
@@ -1000,6 +1271,14 @@ export default function InventoryView({
                             >
                               Edit
                             </GlassButton>
+                            <button
+                              type="button"
+                              onClick={() => handleSingleDelete(item)}
+                              className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/25 transition-colors cursor-pointer"
+                              title="Delete part (move to Recycle Bin)"
+                            >
+                              <Trash2 size={14} />
+                            </button>
                           </>
                         ) : (
                           <>
@@ -1024,6 +1303,14 @@ export default function InventoryView({
                             >
                               Edit
                             </GlassButton>
+                            <button
+                              type="button"
+                              onClick={() => handleSingleDelete(item)}
+                              className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/25 transition-colors cursor-pointer"
+                              title="Delete part (move to Recycle Bin)"
+                            >
+                              <Trash2 size={14} />
+                            </button>
                           </>
                         )}
                       </div>

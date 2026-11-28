@@ -23,11 +23,14 @@ class SparePartBase(BaseModel):
     barcode: str | None = None
     qr_code: str | None = None
     is_confirmed: bool = True
+    is_deleted: bool = False
+    deleted_at: datetime | None = None
 
 
 # 2. Schema for Creating a Part (POST)
 class SparePartCreate(SparePartBase):
     is_confirmed: bool | None = None
+    is_deleted: bool | None = None
 
 
 # 3. Schema for Updating a Part (PUT)
@@ -50,6 +53,7 @@ class SparePartUpdate(BaseModel):
     barcode: str | None = None
     qr_code: str | None = None
     is_confirmed: bool | None = None
+    is_deleted: bool | None = None
 
 
 # 4. Schema Returned to Frontend (GET)
@@ -90,5 +94,29 @@ class SparePartSingleConfirmRequest(BaseModel):
 class BatchConfirmResponse(BaseModel):
     confirmed_count: int
     part_ids: list[int]
+    message: str = ""
+
+
+# 10. Schema for Batch Deleting Items (Soft Delete)
+class SparePartBatchDeleteRequest(BaseModel):
+    part_ids: list[int]
+
+
+class BatchDeleteResponse(BaseModel):
+    deleted_count: int
+    part_ids: list[int]
+    message: str = ""
+
+
+# 11. Schema for Batch Restoring Soft-Deleted Items
+class SparePartBatchRestoreRequest(BaseModel):
+    part_ids: list[int]
+
+
+class BatchRestoreResponse(BaseModel):
+    restored_count: int
+    part_ids: list[int]
+    message: str = ""
+
 
 

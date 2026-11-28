@@ -68,6 +68,7 @@ export default function GlassHeader({
     if (!trimmed || !products || products.length === 0) return [];
     return products
       .filter((p) => {
+        if (p.isConfirmed === false || p.isDeleted) return false;
         const target = `${p.name} ${p.brand} ${p.partNumber} ${p.modelNumber} ${p.compatibleBikes} ${p.rackNumber} ${p.barcode} ${p.supplierName || ""}`;
         return matchSearchTokens(target, trimmed);
       })

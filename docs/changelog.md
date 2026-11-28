@@ -7,7 +7,58 @@ and follows the governance instructions established in `AGENTS.md`.
 
 ---
 
-## 2026-11-27
+## 2026-11-28
+
+### Added
+- `backend/alembic/versions/e2a3b4c5d6e7_add_soft_delete_to_spare_parts.py`: Applied migration adding indexed `is_deleted` (`BOOLEAN`, default `false`, indexed `ix_spare_parts_is_deleted`) and `deleted_at` (`TIMESTAMPTZ`, nullable) to `spare_parts`.
+- `backend/app/models/spare_part.py`: Added `is_deleted` and `deleted_at` ORM columns to `SparePart` model.
+- `backend/app/schemas/spare_part.py`:
+  - Added `is_deleted: bool = False` and `deleted_at: datetime | None = None` across spare part schemas.
+  - Added `SparePartBatchDeleteRequest(part_ids: list[int])`, `BatchDeleteResponse`, `SparePartBatchRestoreRequest(part_ids: list[int])`, and `BatchRestoreResponse`.
+- `backend/app/repositories/spare_part_repo.py`:
+  - Added `is_deleted: bool = False` filter parameter to `search_parts()`.
+  - Added `include_deleted: bool = False` parameter to `get_by_barcode()` and `get_by_part_number()`.
+- `backend/app/services/inventory_service.py`:
+  - Implemented `delete_part(part_id: int)` soft delete and `delete_parts_batch(part_ids: list[int])`.
+  - Implemented `restore_part(part_id: int)` and `restore_parts_batch(part_ids: list[int])`.
+  - Added validation guards in `restock_part()` rejecting unconfirmed (`is_confirmed = False`) or deleted (`is_deleted = True`) parts (`HTTP 400`).
+  - Added `is_deleted: bool = False` filtering to `search_catalog()`.
+- `backend/app/services/billing_service.py`:
+  - Added strict validation guards in `process_checkout()` and `update_invoice()` rejecting unconfirmed or deleted parts (`HTTP 400`).
+- `backend/app/services/supplier_service.py`:
+  - Filtered `is_deleted == False` in `get_supplier_parts()` and `get_supplier_response()`.
+  - Sorted supplied parts by `created_at DESC` for daily inward analysis.
+- `backend/app/api/v1/endpoints/spare_parts.py`:
+  - Mounted `DELETE /api/v1/parts/{part_id}` (soft delete, `HTTP 204 No Content`).
+  - Mounted `POST /api/v1/parts/delete-batch` (atomic batch soft delete).
+  - Mounted `POST /api/v1/parts/{part_id}/restore` (restore soft-deleted part).
+  - Mounted `POST /api/v1/parts/restore-batch` (atomic batch restore).
+  - Added `is_deleted: bool = False` query parameter to `GET /api/v1/parts`.
+- `frontend/src/types/index.ts`:
+  - Added `isDeleted?: boolean`, `deletedAt?: string`, and `createdAt?: string` to `SparePart` interface.
+- `frontend/src/api/modules/parts.api.ts`:
+  - Mapped `isDeleted`, `deletedAt`, and `createdAt` from backend JSON responses.
+  - Implemented `partsApi.deleteBatch(partIds)`, `partsApi.restore(partId)`, and `partsApi.restoreBatch(partIds)`.
+  - Added `is_deleted?: boolean` support to `partsApi.getAll()`.
+- `frontend/src/components/layout/GlassHeader.tsx` & `frontend/src/components/views/SearchView.tsx`:
+  - Enforced strict filtering excluding unconfirmed and soft-deleted items (`p.isConfirmed !== false && !p.isDeleted`) from header autocomplete and dedicated search views.
+- `frontend/src/components/views/BillingView.tsx`:
+  - Enforced POS billing lock rejecting unconfirmed and soft-deleted items on barcode scan and part search with error toast.
+- `frontend/src/components/views/InventoryView.tsx`:
+  - **3-Sub-Tab Architecture**:
+    - **🟢 Confirmed Items Sub-Tab**: Active counter catalog with Goods Inward Restock, editing, and soft delete.
+    - **🟡 Unconfirmed / Bulk Uploads Sub-Tab**: Staging queue with status pill `🟡 Unconfirmed`, multi-select batch confirmation, and batch deletion to Recycle Bin. Restock action is completely hidden and POS sales blocked.
+    - **🔴 Deleted Items / Recycle Bin Sub-Tab**: Isolated view of soft-deleted parts with deletion timestamps, multi-select floating action bar for bulk restoration, and single-row `🔄 Restore` action.
+  - Status column renders `🟡 Unconfirmed` for unconfirmed items, `🔴 Deleted` for soft-deleted items, and standard stock badges for active items.
+- `frontend/src/components/views/SuppliersView.tsx`:
+  - Added **Entry Date Filter** dropdown in "View Items" modal with part counts per date and "All Entry Dates" option.
+  - Added 4-card **Daily Inward Stock Valuation Banner**: Filtered SKUs, Total Inward Units, Stock Cost Valuation (₹ purchase price), and Retail MRP Valuation (₹ selling price).
+  - Added formatted **Entry Date** column to the supplied parts table.
+- `docs/requirement.md`: Documented 3-stage catalog architecture, POS & restock locks, soft deletion lifecycle, and supplier daily stock valuation.
+- `docs/api-reference.md`: Documented soft delete endpoints, batch endpoints, restore endpoints, `is_deleted` parameter, and POS/restock 400 error codes.
+- `docs/database-design.md`: Documented `is_deleted` and `deleted_at` columns, B-tree index, and migration `e2a3b4c5d6e7`.
+- `docs/backend-architecture.md`: Added Section 14 detailing soft delete pattern, recycle bin architecture, and integrity validation guards.
+- `docs/ui-architecture.md`: Documented 3-sub-tab inventory view and supplier daily valuation module.
 
 ### Added
 - `backend/alembic/versions/d1e8f3a5b7c9_add_is_confirmed_to_spare_parts.py`: Created and applied migration adding `is_confirmed` (`BOOLEAN`, `server_default='true'`, `nullable=False`, indexed) to `spare_parts`.

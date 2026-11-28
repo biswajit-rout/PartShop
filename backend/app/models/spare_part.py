@@ -1,5 +1,6 @@
+from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import String, Integer, Numeric, Text, ForeignKey, Boolean
+from sqlalchemy import String, Integer, Numeric, Text, ForeignKey, Boolean, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from app.models.base import TimestampMixin
@@ -42,6 +43,15 @@ class SparePart(Base, TimestampMixin):
     # Items bulk-imported from Excel start as False (Unconfirmed Staging) until verified by admin
     is_confirmed: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default="true", nullable=False, index=True
+    )
+
+    # Soft Delete Lifecycle
+    # Deleted items are preserved in a recycle bin tab and excluded from active sales
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False, index=True
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     # Pricing & Discounts (Numeric prevents floating-point penny rounding bugs)
