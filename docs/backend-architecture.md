@@ -340,3 +340,60 @@ flowchart TD
   - `SupplierService.get_effective_discount()`: Evaluates supplier brand matrix with fallback to supplier base discount.
   - `ImportService.import_parts_from_excel()`: Pre-caches supplier discount matrix and brand default discounts in lock-free memory, auto-computing dealer cost and default customer discounts per row without database locking.
   - `InventoryService.create_part()`: Automatically infers purchase discount and selling discounts during single-part entry.
+
+---
+
+## 13. Inventory Confirmation & Bulk Staging Lifecycle Engine
+
+### 13.1 Staging Queue Architecture
+To guarantee that unverified bulk spreadsheet uploads cannot be accidentally billed before warehouse staff verify rack shelf locations and selling prices, the backend implements a two-stage catalog lifecycle:
+
+```mermaid
+flowchart TD
+    subgraph Ingest["Bulk Ingestion Stage"]
+        XLSX["Excel Workbook (.xlsx)<br/>Thousands of parts"]
+        Import["ImportService.import_parts_from_excel()"]
+        Staging["PostgreSQL spare_parts<br/>is_confirmed = FALSE<br/>rack_number = 'Unassigned'"]
+    end
+
+    subgraph Verification["Verification & Staging Queue"]
+        StagingUI["Unconfirmed Staging Tab<br/>(GET /parts?is_confirmed=false)"]
+        RackCheck{"Rack Assigned?"}
+        Prompt["⚠️ Missing Rack Alert / Inline Prompt"]
+        MultiSelect["Multi-Select Checkboxes<br/>Select All Visible"]
+    end
+
+    subgraph Confirmation["Confirmation & Activation Engine"]
+        BatchConfirm["InventoryService.confirm_parts(part_ids)<br/>POST /parts/confirm-batch"]
+        SingleConfirm["InventoryService.confirm_single_part(part_id, rack)<br/>POST /parts/{id}/confirm"]
+        ActiveCatalog[("Active Confirmed Catalog<br/>is_confirmed = TRUE")]
+    end
+
+    subgraph Counter["POS Counter Sales"]
+        POS["BillingView & POS Scanner<br/>Auto-complete excludes is_confirmed=false"]
+    end
+
+    XLSX --> Import
+    Import --> Staging
+    Staging --> StagingUI
+    StagingUI --> RackCheck
+    RackCheck -- No --> Prompt
+    RackCheck -- Yes / Updated --> MultiSelect
+    Prompt --> SingleConfirm
+    MultiSelect --> BatchConfirm
+    SingleConfirm --> ActiveCatalog
+    BatchConfirm --> ActiveCatalog
+    ActiveCatalog --> POS
+```
+
+### 13.2 Key Components
+- **Model**: `app/models/spare_part.py` (`is_confirmed` indexed boolean column, default `True`).
+- **Repository**: `app/repositories/spare_part_repo.py` (`search_parts` supporting `is_confirmed: bool | None`).
+- **Service Layer**:
+  - `ImportService`: Sets `is_confirmed = False` on all rows created from Excel workbooks so they route to staging.
+  - `InventoryService.confirm_parts(part_ids: list[int])`: Efficient bulk update setting `is_confirmed = True` across selected part IDs.
+  - `InventoryService.confirm_single_part(part_id: int, rack_number: str | None)`: Validates and updates rack location before activating the part.
+- **API Endpoints**:
+  - `GET /api/v1/parts?is_confirmed=true/false`: Filter catalog by confirmation state.
+  - `POST /api/v1/parts/confirm-batch`: Batch confirmation endpoint.
+  - `POST /api/v1/parts/{part_id}/confirm`: Single part confirm with optional rack assignment.

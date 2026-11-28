@@ -22,11 +22,12 @@ class SparePartBase(BaseModel):
     mechanic_discount: Decimal = Decimal("0.00")
     barcode: str | None = None
     qr_code: str | None = None
+    is_confirmed: bool = True
 
 
 # 2. Schema for Creating a Part (POST)
 class SparePartCreate(SparePartBase):
-    pass
+    is_confirmed: bool | None = None
 
 
 # 3. Schema for Updating a Part (PUT)
@@ -48,6 +49,7 @@ class SparePartUpdate(BaseModel):
     mechanic_discount: Decimal | None = None
     barcode: str | None = None
     qr_code: str | None = None
+    is_confirmed: bool | None = None
 
 
 # 4. Schema Returned to Frontend (GET)
@@ -72,4 +74,21 @@ class SparePartRestock(BaseModel):
     quantity_to_add: int
     purchase_price: Decimal | None = None
     rack_number: str | None = None
+
+
+# 7. Schema for Batch Confirming Unconfirmed Items
+class SparePartBatchConfirmRequest(BaseModel):
+    part_ids: list[int]
+
+
+# 8. Schema for Single Item Confirmation
+class SparePartSingleConfirmRequest(BaseModel):
+    rack_number: str | None = None
+
+
+# 9. Batch Confirmation Response
+class BatchConfirmResponse(BaseModel):
+    confirmed_count: int
+    part_ids: list[int]
+
 

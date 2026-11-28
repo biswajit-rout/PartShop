@@ -489,9 +489,11 @@ export default function BillingView({
   };
 
   // Autocomplete matching: matches bike model, part name, SKU, or barcode using tokenized search
+  // Excludes unconfirmed/staging parts so counter staff only bill validated items
   const searchMatches = barcodeInput.trim()
     ? products
         .filter((p) => {
+          if (p.isConfirmed === false) return false;
           const target = `${p.compatibleBikes} ${p.modelNumber} ${p.name} ${p.partNumber} ${p.brand} ${p.barcode}`;
           return matchSearchTokens(target, barcodeInput);
         })
@@ -1584,6 +1586,7 @@ export default function BillingView({
                     <div className="absolute left-0 right-0 top-full mt-1.5 z-50 max-h-52 overflow-y-auto rounded-xl bg-slate-900/95 border border-sky-500/30 shadow-2xl p-1 space-y-1 no-scrollbar backdrop-blur-md">
                       {products
                         .filter((p) =>
+                          p.isConfirmed !== false &&
                           matchSearchTokens(
                             `${p.compatibleBikes} ${p.modelNumber} ${p.name} ${p.partNumber} ${p.brand} ${p.barcode}`,
                             editPartSearch

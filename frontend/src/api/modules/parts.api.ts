@@ -19,6 +19,7 @@ export interface BackendSparePart {
   customer_discount?: string | number;
   mechanic_discount?: string | number;
   barcode?: string | null;
+  is_confirmed?: boolean;
 }
 
 export interface PaginatedPartsResponse {
@@ -57,19 +58,26 @@ export function mapBackendPartToFrontend(part: BackendSparePart): SparePart {
     mechanicDiscount: Number(part.mechanic_discount || 0),
     status,
     barcode: part.barcode || "",
+    isConfirmed: part.is_confirmed !== false,
   };
 }
 
 export const partsApi = {
   /**
-   * Search and list spare parts with optional text, brand, and supplier filters.
+   * Search and list spare parts with optional text, brand, supplier, and confirmation filters.
    */
-  async getAll(search?: string, brand?: string, supplierId?: number | string): Promise<SparePart[]> {
+  async getAll(
+    search?: string,
+    brand?: string,
+    supplierId?: number | string,
+    isConfirmed?: boolean
+  ): Promise<SparePart[]> {
     const data = await apiClient<PaginatedPartsResponse>("/parts", {
       params: {
         q: search,
         brand: brand && brand !== "All" ? brand : undefined,
         supplier_id: supplierId && supplierId !== "All" ? supplierId : undefined,
+        is_confirmed: isConfirmed !== undefined ? String(isConfirmed) : undefined,
         limit: 500,
       },
       cache: "no-store",
@@ -145,6 +153,28 @@ export const partsApi = {
     const data = await apiClient<BackendSparePart>(`/parts/${id}`, {
       method: "PUT",
       body: JSON.stringify({ barcode }),
+    });
+    return mapBackendPartToFrontend(data);
+  },
+
+  /**
+   * Batch confirm unconfirmed or imported spare parts.
+   */
+  async confirmParts(partIds: (number | string)[]): Promise<{ confirmed_count: number; part_ids: number[] }> {
+    const numericIds = partIds.map((id) => (typeof id === "string" ? parseInt(id, 10) : id));
+    return await apiClient<{ confirmed_count: number; part_ids: number[] }>("/parts/confirm-batch", {
+      method: "POST",
+      body: JSON.stringify({ part_ids: numericIds }),
+    });
+  },
+
+  /**
+   * Confirm a single spare part, optionally updating rack number at the same time.
+   */
+  async confirmPart(id: number | string, rackNumber?: string): Promise<SparePart> {
+    const data = await apiClient<BackendSparePart>(`/parts/${id}/confirm`, {
+      method: "POST",
+      body: JSON.stringify({ rack_number: rackNumber }),
     });
     return mapBackendPartToFrontend(data);
   },

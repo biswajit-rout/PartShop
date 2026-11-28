@@ -129,6 +129,7 @@ class InventoryService:
         brand: str | None = None,
         supplier_id: int | None = None,
         low_stock_only: bool = False,
+        is_confirmed: bool | None = None,
         skip: int = 0,
         limit: int = 50,
     ) -> tuple[list[SparePart], int]:
@@ -138,9 +139,42 @@ class InventoryService:
             brand=brand,
             supplier_id=supplier_id,
             low_stock_only=low_stock_only,
+            is_confirmed=is_confirmed,
             skip=skip,
             limit=limit,
         )
+
+    async def confirm_parts(self, part_ids: list[int]) -> tuple[int, list[int]]:
+        """
+        Batch confirm imported or unconfirmed spare parts.
+        Transitions parts to confirmed catalog status, making them fully active for counter sales.
+        """
+        if not part_ids:
+            return 0, []
+
+        stmt = select(SparePart).where(SparePart.id.in_(part_ids))
+        res = await self.db.execute(stmt)
+        parts = list(res.scalars().all())
+
+        confirmed_ids: list[int] = []
+        for part in parts:
+            part.is_confirmed = True
+            confirmed_ids.append(part.id)
+
+        await self.db.commit()
+        return len(confirmed_ids), confirmed_ids
+
+    async def confirm_single_part(self, part_id: int, rack_number: str | None = None) -> SparePart:
+        """
+        Confirm an individual spare part, optionally updating its rack location before confirmation.
+        """
+        part = await self.get_part_by_id(part_id)
+        if rack_number is not None and rack_number.strip():
+            part.rack_number = rack_number.strip()
+        part.is_confirmed = True
+        await self.db.commit()
+        await self.db.refresh(part)
+        return part
 
     async def update_part(self, part_id: int, update_data: SparePartUpdate) -> SparePart:
         """Update part details, prices, or stock level with audit trail."""

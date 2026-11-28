@@ -78,6 +78,7 @@ class SparePartRepository(BaseRepository[SparePart]):
         brand: str | None = None,
         supplier_id: int | None = None,
         low_stock_only: bool = False,
+        is_confirmed: bool | None = None,
         skip: int = 0,
         limit: int = 50,
     ) -> tuple[list[SparePart], int]:
@@ -122,6 +123,10 @@ class SparePartRepository(BaseRepository[SparePart]):
         # Filter low stock
         if low_stock_only:
             stmt = stmt.where(SparePart.quantity <= SparePart.min_stock_alert)
+
+        # Filter confirmation status (confirmed vs unconfirmed staging)
+        if is_confirmed is not None:
+            stmt = stmt.where(SparePart.is_confirmed == is_confirmed)
 
         # Count total matching rows
         count_stmt = select(func.count()).select_from(stmt.subquery())

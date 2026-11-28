@@ -71,7 +71,29 @@ Expected tables:
 - supplier\_id
 - barcode
 - qr\_code
+- is\_confirmed (boolean, default true for existing items, indexed)
 - created\_at
+
+---
+
+## Inventory Confirmation & Bulk Upload Staging Lifecycle
+
+To prevent unvalidated or unorganized items from entering active counter sales before rack locations and prices are verified:
+
+### 1. Two-Stage Catalog Architecture
+- **🟢 Confirmed Items Sub-Tab**:
+  - Contains validated spare parts with verified rack/shelf locations and pricing.
+  - Active and searchable on the POS billing counter and search auto-completes.
+- **🟡 Unconfirmed / Staging Queue Sub-Tab**:
+  - Automatically receives all new items imported via bulk Excel (.xlsx) uploads (`is_confirmed = False`).
+  - Highlights missing rack numbers (`⚠️ Missing Rack`) to prompt warehouse location assignment.
+  - Hidden from POS checkout searches until explicitly verified.
+
+### 2. Multi-Select & Batch Confirmation
+- Checkbox on every unconfirmed table row + master checkbox to select/deselect all visible items.
+- Floating multi-selection action bar displaying selected item count with a one-click `Confirm Selected (X) & Move to Catalog` action.
+- Single-item confirmation with optional inline rack location assignment modal.
+- Once confirmed, items immediately transition to `is_confirmed = True` and appear in the confirmed catalog.
 
 ### Suppliers
 

@@ -10,6 +10,9 @@ from app.schemas.spare_part import (
     SparePartResponse,
     PaginatedSpareParts,
     SparePartRestock,
+    SparePartBatchConfirmRequest,
+    SparePartSingleConfirmRequest,
+    BatchConfirmResponse,
 )
 from app.services.inventory_service import InventoryService
 from app.api.deps import get_current_user, require_role
@@ -17,20 +20,20 @@ from app.api.deps import get_current_user, require_role
 router = APIRouter(prefix="/parts", tags=["Spare Parts Catalog"])
 
 
-# 1. Create a New Spare Part (Admin & Store Manager only)
+# 1. Create a New Spare Part (Admin, Store Manager & Counter Staff)
 @router.post(
     "",
     response_model=SparePartResponse,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_role(
-        [UserRole.ADMIN, UserRole.STORE_MANAGER]))],
+        [UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
 )
 @router.post(
     "/",
     response_model=SparePartResponse,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_role(
-        [UserRole.ADMIN, UserRole.STORE_MANAGER]))],
+        [UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
     include_in_schema=False,
 )
 async def create_spare_part(
@@ -56,6 +59,8 @@ async def list_spare_parts(
         None, description="Filter by supplier ID"),
     low_stock_only: bool = Query(
         False, description="Filter only items below min stock threshold"),
+    is_confirmed: bool | None = Query(
+        None, description="Filter by confirmation status (True=confirmed, False=unconfirmed staging)"),
     skip: int = Query(0, ge=0, description="Pagination offset"),
     limit: int = Query(50, ge=1, le=500, description="Page size limit"),
 ):
@@ -66,6 +71,7 @@ async def list_spare_parts(
         brand=brand,
         supplier_id=supplier_id,
         low_stock_only=low_stock_only,
+        is_confirmed=is_confirmed,
         skip=skip,
         limit=limit,
     )
@@ -74,6 +80,26 @@ async def list_spare_parts(
         "skip": skip,
         "limit": limit,
         "items": items,
+    }
+
+
+# 2.5 Batch Confirm Parts (Admin & Store Manager)
+@router.post(
+    "/confirm-batch",
+    response_model=BatchConfirmResponse,
+    dependencies=[Depends(require_role([UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
+)
+async def confirm_parts_batch(
+    payload: SparePartBatchConfirmRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Multi-select confirm unconfirmed or imported spare parts."""
+    service = InventoryService(db)
+    count, ids = await service.confirm_parts(payload.part_ids)
+    return {
+        "confirmed_count": count,
+        "part_ids": ids,
+        "message": f"Successfully confirmed {count} spare part(s).",
     }
 
 
@@ -133,3 +159,21 @@ async def restock_spare_part(
     """Fast goods inward: increment stock level and log audit ledger."""
     service = InventoryService(db)
     return await service.restock_part(part_id, restock_in)
+
+
+# 7. Single Part Confirm (Admin, Store Manager & Counter Staff)
+@router.post(
+    "/{part_id}/confirm",
+    response_model=SparePartResponse,
+    dependencies=[Depends(require_role(
+        [UserRole.ADMIN, UserRole.STORE_MANAGER, UserRole.COUNTER_STAFF]))],
+)
+async def confirm_single_part(
+    part_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    payload: SparePartSingleConfirmRequest | None = None,
+):
+    """Confirm a single spare part, optionally updating rack number at the same time."""
+    service = InventoryService(db)
+    rack = payload.rack_number if payload else None
+    return await service.confirm_single_part(part_id, rack_number=rack)

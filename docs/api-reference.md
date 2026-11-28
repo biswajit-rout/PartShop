@@ -155,6 +155,7 @@ Fast paginated catalog search by item name, part number, compatible motorcycle m
   - `q` (string, optional): Multi-token search query across all part attributes (e.g., `"Bajaj pulsar Air filter"`, `"Activa brake"`, `"Splendor clutch"`). Splits into whitespace-separated tokens and requires all tokens to be satisfied across any part field with synonym expansion.
   - `brand` (string, optional): Filter by brand (e.g. `Hero`, `Bajaj`, `Honda`).
   - `low_stock_only` (boolean, optional, default: `false`): Filter items where `quantity <= min_stock_alert`.
+  - `is_confirmed` (boolean, optional): Filter by confirmation status (`true` for confirmed catalog, `false` for unconfirmed staging queue).
   - `skip` (integer, default: `0`): Pagination offset.
   - `limit` (integer, default: `50`, max: `500`): Page size.
 - **Response (`200 OK`)**:
@@ -241,6 +242,49 @@ Quickly restocks an existing spare part from shipment delivery or inward scan: i
 - **Error Codes**:
   - `404 Not Found`: Spare part with ID not found.
   - `400 Bad Request`: Invalid quantity to add.
+
+---
+
+### 3.6 Batch Confirm Spare Parts
+Multi-select confirm unconfirmed or staging spare parts (e.g. newly imported from bulk Excel workbooks). Transitions parts to `is_confirmed = True`, making them instantly active for POS counter sales.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/parts/confirm-batch`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SparePartBatchConfirmRequest`)**:
+  ```json
+  {
+    "part_ids": [101, 102, 105, 108]
+  }
+  ```
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "confirmed_count": 4,
+    "part_ids": [101, 102, 105, 108],
+    "message": "Successfully confirmed 4 spare part(s)."
+  }
+  ```
+- **Error Codes**:
+  - `401 Unauthorized`: Missing or invalid credentials.
+
+---
+
+### 3.7 Single Part Confirm & Rack Location Assignment
+Validates and confirms an individual spare part, optionally updating or assigning its warehouse shelf/rack locator at the same time.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/parts/{part_id}/confirm`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SparePartSingleConfirmRequest`, Optional)**:
+  ```json
+  {
+    "rack_number": "RACK-A02"
+  }
+  ```
+- **Response (`200 OK`)**: Updated `SparePartResponse` object with `is_confirmed: true` and updated `rack_number`.
+- **Error Codes**:
+  - `404 Not Found`: Part ID not found.
 
 ---
 

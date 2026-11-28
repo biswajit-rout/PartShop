@@ -343,11 +343,21 @@ The seven domain views in `src/components/views/` correspond directly to the fun
 - **Top Movers**: Ranked list of highest volume turnaround spare parts.
 
 ### 7.2 Inventory Module (`InventoryView.tsx`)
-- **Live Search & Filtering**: Multi-field client search against item name, brand, part number, model number, compatible bikes, and rack location.
-- **Brand & Stock Facets**: Dropdown filters for brands (`Hero`, `Honda`, `TVS`, `Rollon`, `Castrol`, `Local`) and statuses (`In Stock`, `Low Stock`, `Out of Stock`).
-- **Excel Import Specification**: Toggled alert banner documenting the required 12-column `.xlsx` schema matching backend requirements.
-- **Export Stubs**: Action triggers for Excel (`.xlsx`), CSV, and PDF exports.
-- **Rack Location Indexing**: High-visibility pill badges displaying warehouse rack bins (e.g. `RACK-A-01`).
+Features a 2-sub-tab catalog confirmation & staging architecture:
+1. **🟢 Confirmed Items Sub-Tab**:
+   - Displays all validated, verified spare parts that are active for POS counter sales and barcode gun scanning.
+   - Shows live count badge (`{confirmedCount}`) with verified status pill.
+   - Real-time multi-token automotive search and brand/supplier/status dropdown filters.
+   - Fast Restock (Goods Inward) modal and full part editing modal.
+2. **🟡 Unconfirmed / Bulk Uploads Sub-Tab**:
+   - Dedicated staging queue where parts imported from Excel workbooks (.xlsx) automatically land (`is_confirmed = False`).
+   - Dynamic counter badge (`{unconfirmedCount}`) with pulsing animation when items require verification.
+   - **Multi-Selection Checkbox Controls**: Table header master checkbox to select/deselect all visible items, plus individual row checkboxes.
+   - **Floating / Sticky Batch Action Bar**: Displays selected item count with a one-click `Confirm Selected (X) & Move to Catalog` action.
+   - **Rack Location Verification**: Unassigned items display a prominent amber `⚠️ Missing Rack` button that triggers a quick rack assignment & confirmation modal.
+   - **Single-Click Confirm**: Immediate confirmation action button per row that activates the part and transitions it into the confirmed catalog.
+- **Brand Master Modal**: Live brand creation and default customer/mechanic discount percentage editor.
+- **Excel Import Specification**: Upload modal supporting supplier mapping, brand overrides, and purchase discount auto-calculations.
 
 ### 7.3 POS & Billing Module (`BillingView.tsx`)
 Features a 2-sub-tab architecture:

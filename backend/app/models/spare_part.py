@@ -1,5 +1,5 @@
 from decimal import Decimal
-from sqlalchemy import String, Integer, Numeric, Text, ForeignKey
+from sqlalchemy import String, Integer, Numeric, Text, ForeignKey, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from app.models.base import TimestampMixin
@@ -37,6 +37,12 @@ class SparePart(Base, TimestampMixin):
         Integer, default=5, nullable=False)
     rack_number: Mapped[str | None] = mapped_column(
         String(50), nullable=True)  # e.g., "Rack-B, Shelf-2"
+
+    # Item Confirmation / Validation Lifecycle
+    # Items bulk-imported from Excel start as False (Unconfirmed Staging) until verified by admin
+    is_confirmed: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true", nullable=False, index=True
+    )
 
     # Pricing & Discounts (Numeric prevents floating-point penny rounding bugs)
     purchase_price: Mapped[Decimal] = mapped_column(

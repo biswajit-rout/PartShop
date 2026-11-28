@@ -52,6 +52,7 @@ erDiagram
         numeric supplier_discount "5, 2 default 0.0"
         varchar barcode UK "Indexed"
         varchar qr_code
+        boolean is_confirmed "Indexed"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -212,6 +213,7 @@ Stores the inventory catalog, pricing tiers, barcodes, and bin/rack locations.
 | `supplier_discount` | `NUMERIC(5, 2)` | `NOT NULL`, Default: `0.00` | Supplier purchase discount rate provided to shop |
 | `barcode` | `VARCHAR(100)` | `UNIQUE`, `NULLABLE`, `INDEXED` | Scannable POS barcode |
 | `qr_code` | `VARCHAR(255)` | `NULLABLE` | QR Code locator identifier |
+| `is_confirmed` | `BOOLEAN` | `NOT NULL`, Default: `TRUE`, `INDEXED` | Confirmation staging flag (False=unconfirmed bulk upload) |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Record creation timestamp (UTC) |
 | `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, Default: `NOW()` | Automatic update timestamp (UTC) |
 
@@ -359,3 +361,16 @@ Multi-brand wholesale purchase discount matrix per distributor (Migration: `b8e4
 1. **Barcode / SKU Lookups**: Fast point-of-sale scanning requires `< 5ms` queries. An explicit `B-tree index` is placed on `spare_parts.barcode` and `spare_parts.part_number`.
 2. **Brand & Filter Queries**: `spare_parts.brand_name` is indexed to accelerate sidebar catalog filtering in the POS view.
 3. **Authentication Queries**: `users.username` and `users.email` have unique B-tree indexes for fast credential lookups during cashier sign-in.
+4. **Catalog Confirmation Staging Queries**: `spare_parts.is_confirmed` has a B-tree index (`ix_spare_parts_is_confirmed`) to rapidly separate confirmed catalog parts from staging queue bulk imports without scanning the full table.
+
+---
+
+## 5. Migration History
+
+| Version Revision | Name / Purpose | Applicable Tables |
+| :--- | :--- | :--- |
+| `0932c0fa0f57` | Initial migration schema | `users`, `brands`, `mechanics`, `suppliers`, `spare_parts`, `sales`, `sale_items`, `stock_movements` |
+| `b8e4f1a2c3d5` | Supplier brand discounts & brand default discounts | `supplier_brand_discounts`, `brands.default_customer_discount`, `brands.default_mechanic_discount` |
+| `e7c2a1f4b89d` | Daily shop operational expenditures | `expenses` |
+| `c9d5e2f1a8b4` | Invoice cancellation, voiding & return audit | `sales.status`, `sales.cancellation_reason`, `sales.cancelled_at` |
+| `d1e8f3a5b7c9` | Spare parts confirmation & staging queue | `spare_parts.is_confirmed` (boolean, default true, indexed) |

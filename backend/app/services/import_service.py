@@ -321,6 +321,7 @@ class ImportService:
                 customer_discount=default_cust_disc,
                 mechanic_discount=default_mech_disc,
                 barcode=barcode,
+                is_confirmed=False,  # Bulk Excel uploads start in Unconfirmed Staging
             )
 
             self.db.add(new_part)

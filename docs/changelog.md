@@ -10,6 +10,37 @@ and follows the governance instructions established in `AGENTS.md`.
 ## 2026-11-27
 
 ### Added
+- `backend/alembic/versions/d1e8f3a5b7c9_add_is_confirmed_to_spare_parts.py`: Created and applied migration adding `is_confirmed` (`BOOLEAN`, `server_default='true'`, `nullable=False`, indexed) to `spare_parts`.
+- `backend/app/models/spare_part.py`: Added `is_confirmed: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False, index=True)`.
+- `backend/app/schemas/spare_part.py`:
+  - Added `is_confirmed: bool` to `SparePartBase`, `SparePartCreate`, and `SparePartUpdate`.
+  - Added `SparePartBatchConfirmRequest(part_ids: list[int])`, `SparePartSingleConfirmRequest(rack_number: str | None)`, and `BatchConfirmResponse`.
+- `backend/app/services/import_service.py`: Updated Excel bulk upload engine so that all newly imported spare parts are created with `is_confirmed = False`, automatically routing bulk imports to the unconfirmed staging queue.
+- `backend/app/repositories/spare_part_repo.py`: Added `is_confirmed: bool | None` filter to `search_parts()`.
+- `backend/app/services/inventory_service.py`:
+  - Added `is_confirmed: bool | None` filter parameter to `search_catalog()`.
+  - Implemented `confirm_parts(part_ids: list[int]) -> tuple[int, list[int]]` for bulk confirmation of staging parts.
+  - Implemented `confirm_single_part(part_id: int, rack_number: str | None) -> SparePart` for individual verification and rack assignment.
+- `backend/app/api/v1/endpoints/spare_parts.py`:
+  - Added `is_confirmed: bool | None = Query(None)` to `GET /api/v1/parts`.
+  - Mounted `POST /api/v1/parts/confirm-batch` (multi-select batch confirm endpoint).
+  - Mounted `POST /api/v1/parts/{part_id}/confirm` (single part confirm endpoint with rack assignment).
+  - Extended part creation permissions to `COUNTER_STAFF` for seamless manual part entry.
+- `frontend/src/types/index.ts`: Added `isConfirmed?: boolean` to `SparePart` interface.
+- `frontend/src/api/modules/parts.api.ts`:
+  - Added `is_confirmed?: boolean` to `BackendSparePart` and mapped `isConfirmed: part.is_confirmed !== false`.
+  - Added `confirmParts(partIds: (number | string)[])` and `confirmPart(partId: number | string, rackNumber?: string)`.
+  - Added `isConfirmed?: boolean` parameter to `partsApi.getAll()`.
+- `frontend/src/components/views/InventoryView.tsx`:
+  - **Two-Sub-Tab Architecture**:
+    - **🟢 Confirmed Items Sub-Tab**: Validated parts with verified rack locations and pricing ready for counter POS sales, displaying a live count badge (`{confirmedCount}`).
+    - **🟡 Unconfirmed / Bulk Uploads Sub-Tab**: Staging queue where bulk Excel (.xlsx) uploads automatically land, displaying an animated count badge (`{unconfirmedCount}`).
+  - **Multi-Selection Checkbox Controls**: Table header master checkbox to select/deselect all visible items, plus row-level checkboxes.
+  - **Floating Multi-Select Action Bar**: Displays selected item count with a one-click `Confirm Selected (X) & Move to Catalog` action and `Clear Selection`.
+  - **Inline Rack Verification**: Missing rack locations are prominently flagged with an amber `⚠️ Missing Rack` button opening a quick-assignment modal.
+  - **Single Confirm Action**: Direct `Confirm` button per row with instant activation.
+  - **Empty State**: Friendly illustration and notice when all staging items have been confirmed.
+- `frontend/src/components/views/BillingView.tsx`: Filtered search autocompletes to prioritize confirmed items and prevent unverified staging parts from being billed at the POS counter before admin approval.
 - `docker-compose.prod.yml` & `Caddyfile` & `.env.prod.example`: Added production-hardened Docker orchestration featuring a Caddy 2 edge reverse proxy (automatic Let's Encrypt HTTPS and WebSocket proxying), internal-only PostgreSQL and FastAPI networking, non-root production containers, automatic `alembic upgrade head` startup migrations, and container healthchecks.
 - `backend/.dockerignore`: Excluded local `.venv/`, `__pycache__/`, `.env*`, and git metadata from backend Docker build contexts.
 - `backend/app/core/config.py`: Added environment-driven `CORS_ORIGINS` and `CORS_ORIGIN_REGEX` settings with `cors_origins_list` parser.

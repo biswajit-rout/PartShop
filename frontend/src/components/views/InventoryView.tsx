@@ -36,6 +36,9 @@ import {
   ExternalLink,
   RotateCcw,
   PlusCircle,
+  CheckSquare,
+  Square,
+  CheckCheck,
 } from "lucide-react";
 
 interface InventoryViewProps {
@@ -54,6 +57,17 @@ export default function InventoryView({
   const [selectedBrand, setSelectedBrand] = useState<string>("All");
   const [selectedStatus, setSelectedStatus] = useState<string>("All");
   const [selectedSupplier, setSelectedSupplier] = useState<string>("All");
+
+  // Sub-Tab Navigation: Confirmed vs Unconfirmed Staging
+  const [activeInventoryTab, setActiveInventoryTab] = useState<"confirmed" | "unconfirmed">("confirmed");
+  const [selectedUnconfirmedIds, setSelectedUnconfirmedIds] = useState<Set<string>>(new Set());
+  const [isConfirmingBulk, setIsConfirmingBulk] = useState(false);
+  const [confirmToast, setConfirmToast] = useState<string | null>(null);
+
+  // Quick Rack Assignment & Single Confirmation Modal
+  const [quickRackTarget, setQuickRackTarget] = useState<SparePart | null>(null);
+  const [quickRackValue, setQuickRackValue] = useState("");
+  const [isConfirmingSingle, setIsConfirmingSingle] = useState(false);
 
   // Excel Bulk Import States
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -205,8 +219,16 @@ export default function InventoryView({
     }
   };
 
+  // Total counts for confirmed and unconfirmed sub-tabs
+  const confirmedCount = products.filter((p) => p.isConfirmed !== false).length;
+  const unconfirmedCount = products.filter((p) => p.isConfirmed === false).length;
+
   // Tokenized multi-attribute search filter with automotive synonym expansion & supplier filter
   const filteredProducts = products.filter((item) => {
+    // Sub-tab partition
+    if (activeInventoryTab === "confirmed" && item.isConfirmed === false) return false;
+    if (activeInventoryTab === "unconfirmed" && item.isConfirmed !== false) return false;
+
     const searchTarget = `${item.name} ${item.brand} ${item.partNumber} ${item.modelNumber} ${item.compatibleBikes} ${item.rackNumber} ${item.barcode} ${item.supplierName || ""}`;
     const matchesSearch = matchSearchTokens(searchTarget, searchQuery);
     const matchesBrand =
@@ -219,6 +241,83 @@ export default function InventoryView({
       (item.supplierName && item.supplierName.toLowerCase() === selectedSupplier.toLowerCase());
     return matchesSearch && matchesBrand && matchesStatus && matchesSupplier;
   });
+
+  // Multi-select handlers for unconfirmed items
+  const toggleSelectPart = (id: string) => {
+    setSelectedUnconfirmedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const isAllVisibleSelected =
+    filteredProducts.length > 0 &&
+    filteredProducts.every((p) => selectedUnconfirmedIds.has(p.id));
+
+  const toggleSelectAllVisible = () => {
+    if (isAllVisibleSelected) {
+      setSelectedUnconfirmedIds((prev) => {
+        const next = new Set(prev);
+        filteredProducts.forEach((p) => next.delete(p.id));
+        return next;
+      });
+    } else {
+      setSelectedUnconfirmedIds((prev) => {
+        const next = new Set(prev);
+        filteredProducts.forEach((p) => next.add(p.id));
+        return next;
+      });
+    }
+  };
+
+  // Bulk confirm handler
+  const handleBulkConfirm = async () => {
+    if (selectedUnconfirmedIds.size === 0) return;
+    setIsConfirmingBulk(true);
+    try {
+      const ids = Array.from(selectedUnconfirmedIds).map((id) => parseInt(id, 10));
+      const res = await partsApi.confirmParts(ids);
+      setConfirmToast(`Successfully confirmed ${res.confirmed_count} part(s)! Moved to active catalog.`);
+      setSelectedUnconfirmedIds(new Set());
+      if (onRefreshCatalog) {
+        onRefreshCatalog();
+      }
+      setTimeout(() => setConfirmToast(null), 4000);
+    } catch (err: any) {
+      setConfirmToast(`Failed to confirm parts: ${err.message}`);
+      setTimeout(() => setConfirmToast(null), 4500);
+    } finally {
+      setIsConfirmingBulk(false);
+    }
+  };
+
+  // Single confirm handler
+  const handleSingleConfirm = async (part: SparePart, rackOverride?: string) => {
+    setIsConfirmingSingle(true);
+    try {
+      await partsApi.confirmPart(
+        part.id,
+        rackOverride !== undefined
+          ? rackOverride
+          : part.rackNumber && part.rackNumber !== "Unassigned"
+          ? part.rackNumber
+          : undefined
+      );
+      setConfirmToast(`Part '${part.name}' confirmed and activated for counter sales!`);
+      setQuickRackTarget(null);
+      if (onRefreshCatalog) {
+        onRefreshCatalog();
+      }
+      setTimeout(() => setConfirmToast(null), 3500);
+    } catch (err: any) {
+      setConfirmToast(`Failed to confirm part: ${err.message}`);
+      setTimeout(() => setConfirmToast(null), 4000);
+    } finally {
+      setIsConfirmingSingle(false);
+    }
+  };
 
   // Handle Real Excel Upload with selected Supplier & Discount
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -508,6 +607,160 @@ export default function InventoryView({
         </div>
       )}
 
+      {/* Sub-Tab Navigation: Confirmed vs Unconfirmed Staging */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-1.5 rounded-2xl bg-white/[0.03] border border-white/10">
+        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-950/40">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveInventoryTab("confirmed");
+              setSelectedUnconfirmedIds(new Set());
+            }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+              activeInventoryTab === "confirmed"
+                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-lg shadow-emerald-500/10"
+                : "text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]"
+            }`}
+          >
+            <CheckCircle2 size={16} className={activeInventoryTab === "confirmed" ? "text-emerald-400" : "text-slate-400"} />
+            <span>Confirmed Items</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[11px] font-mono font-bold ${
+                activeInventoryTab === "confirmed"
+                  ? "bg-emerald-500/30 text-emerald-200"
+                  : "bg-white/10 text-slate-400"
+              }`}
+            >
+              {confirmedCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveInventoryTab("unconfirmed")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+              activeInventoryTab === "unconfirmed"
+                ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-lg shadow-amber-500/10"
+                : "text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]"
+            }`}
+          >
+            <AlertTriangle size={16} className={activeInventoryTab === "unconfirmed" ? "text-amber-400" : "text-slate-400"} />
+            <span>Unconfirmed / Bulk Uploads</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[11px] font-mono font-bold ${
+                unconfirmedCount > 0
+                  ? "bg-amber-500/30 text-amber-200 animate-pulse"
+                  : "bg-white/10 text-slate-400"
+              }`}
+            >
+              {unconfirmedCount}
+            </span>
+          </button>
+        </div>
+
+        <div className="text-xs text-slate-400 px-3 py-1 font-mono flex items-center gap-2">
+          {activeInventoryTab === "confirmed" ? (
+            <span className="text-emerald-400/90 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              Verified Active Catalog · Ready for POS Counter Sales
+            </span>
+          ) : (
+            <span className="text-amber-400/90 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              Staging Queue · Verify rack numbers and multi-select to confirm
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Unconfirmed Queue Informational Guide */}
+      {activeInventoryTab === "unconfirmed" && (
+        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs text-amber-200/90">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-amber-500/20 text-amber-300 shrink-0">
+              <AlertTriangle size={18} />
+            </div>
+            <div>
+              <p className="font-semibold text-white">
+                Unconfirmed Staging Queue ({unconfirmedCount} items awaiting verification)
+              </p>
+              <p className="text-slate-300 text-[11px] mt-0.5">
+                Parts imported from Excel spreadsheets land here automatically. Verify part details and assign missing Rack Locations, then select items using the checkboxes and click <strong>Confirm</strong> to activate them in the sales catalog.
+              </p>
+            </div>
+          </div>
+          {filteredProducts.length > 0 && (
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={toggleSelectAllVisible}
+                className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 text-xs font-semibold border border-white/15 transition-colors cursor-pointer"
+              >
+                {isAllVisibleSelected ? "Deselect All Visible" : `Select All Visible (${filteredProducts.length})`}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Confirmation Floating / Action Notification Bar */}
+      {confirmToast && (
+        <div className="p-3 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 text-xs font-mono font-semibold flex items-center justify-between gap-2 shadow-xl animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+            <span>{confirmToast}</span>
+          </div>
+          <button
+            onClick={() => setConfirmToast(null)}
+            className="text-emerald-400 hover:text-white cursor-pointer px-1.5 py-0.5"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Multi-Select Floating Action Bar */}
+      {activeInventoryTab === "unconfirmed" && selectedUnconfirmedIds.size > 0 && (
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/20 via-slate-900 to-emerald-500/20 border border-amber-500/40 shadow-2xl backdrop-blur-md flex flex-wrap items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-amber-500/30 text-amber-300">
+              <CheckSquare size={16} />
+            </div>
+            <span className="text-xs font-semibold text-white">
+              <strong className="font-mono text-amber-300 text-sm">{selectedUnconfirmedIds.size}</strong> item(s) selected for validation
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedUnconfirmedIds(new Set())}
+              className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 text-xs font-semibold transition-colors cursor-pointer"
+            >
+              Clear Selection
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkConfirm}
+              disabled={isConfirmingBulk}
+              className="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all"
+            >
+              {isConfirmingBulk ? (
+                <>
+                  <Sparkles size={14} className="animate-spin" />
+                  <span>Confirming {selectedUnconfirmedIds.size} items...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 size={14} />
+                  <span>Confirm Selected ({selectedUnconfirmedIds.size}) & Move to Catalog</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Filter and Search Bar */}
       <div className="glass-panel rounded-3xl p-4 sm:p-5 flex flex-col md:flex-row items-stretch md:items-center gap-3">
         <div className="relative flex-1">
@@ -572,6 +825,17 @@ export default function InventoryView({
           <table className="w-full text-left text-xs font-sans min-w-[1050px]">
             <thead className="bg-white/[0.03] text-slate-400 font-mono uppercase border-b border-white/10 text-[11px]">
               <tr>
+                {activeInventoryTab === "unconfirmed" && (
+                  <th className="py-3.5 px-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllVisibleSelected}
+                      onChange={toggleSelectAllVisible}
+                      className="w-4 h-4 rounded cursor-pointer accent-amber-500"
+                      title="Select / Deselect all visible items"
+                    />
+                  </th>
+                )}
                 <th className="py-3.5 px-4">Part / Description</th>
                 <th className="py-3.5 px-4">Brand</th>
                 <th className="py-3.5 px-4">Part #</th>
@@ -585,99 +849,188 @@ export default function InventoryView({
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5 font-mono">
-              {filteredProducts.map((item) => (
-                <tr
-                  key={item.id}
-                  className="hover:bg-white/[0.04] transition-colors"
-                >
-                  <td className="py-3.5 px-4 font-sans">
-                    <div className="font-semibold text-white">{item.name}</div>
-                    <div className="text-[11px] text-slate-400 font-mono">
-                      Barcode: {item.barcode || "N/A"}
-                    </div>
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <span className="px-2 py-0.5 rounded-md bg-white/10 text-slate-200 font-sans font-medium text-[11px]">
-                      {item.brand}
-                    </span>
-                  </td>
-                  <td className="py-3.5 px-4 text-sky-400 font-bold">
-                    <div>{item.partNumber}</div>
-                    {item.barcode ? (
-                      <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1 font-normal">
-                        <Barcode size={10} />
-                        {item.barcode}
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => handleTriggerPhoneScan({ partId: item.id, partName: item.name })}
-                        className="text-[10px] text-amber-400 hover:text-amber-300 font-mono flex items-center gap-1 font-normal cursor-pointer transition-colors"
-                        title="Scan and assign barcode"
-                      >
-                        <Smartphone size={10} />
-                        <span>+ Assign Barcode</span>
-                      </button>
-                    )}
-                  </td>
-                  <td className="py-3.5 px-4 font-sans">
-                    {item.supplierName ? (
-                      <div>
-                        <div className="font-semibold text-white truncate max-w-[150px]" title={item.supplierName}>
-                          {item.supplierName}
+              {filteredProducts.length === 0 ? (
+                <tr>
+                  <td colSpan={activeInventoryTab === "unconfirmed" ? 11 : 10} className="py-12 text-center">
+                    {activeInventoryTab === "unconfirmed" && unconfirmedCount === 0 ? (
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <div className="w-12 h-12 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 mb-1">
+                          <CheckCircle2 size={26} />
                         </div>
-                        <span className="text-[10px] text-emerald-400 font-mono font-bold">
-                          {item.supplierDiscount || 0}% purchase disc
-                        </span>
+                        <p className="text-sm font-bold text-white">All Items Confirmed!</p>
+                        <p className="text-xs text-slate-400 max-w-sm">
+                          There are no unconfirmed items pending review. All imported parts have been verified and moved to the active sales catalog.
+                        </p>
                       </div>
                     ) : (
-                      <span className="text-slate-500 text-[11px]">Unassigned</span>
+                      <div className="text-slate-400 py-6">
+                        No spare parts found matching &quot;{searchQuery || selectedBrand}&quot; in this view.
+                      </div>
                     )}
                   </td>
-                  <td className="py-3.5 px-4 font-sans text-slate-300 max-w-[180px] truncate" title={item.compatibleBikes}>
-                    {item.compatibleBikes || "Universal"}
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <span className="px-2 py-0.5 rounded-md bg-sky-500/15 text-sky-300 border border-sky-400/25 font-bold">
-                      {item.rackNumber}
-                    </span>
-                  </td>
-                  <td className="py-3.5 px-4 font-bold text-white text-sm">
-                    {item.quantity}{" "}
-                    <span className="text-xs text-slate-400 font-normal">units</span>
-                  </td>
-                  <td className="py-3.5 px-4 font-bold text-white text-sm">
-                    {formatRupees(item.sellingPrice)}
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <GlassBadge status={item.status} />
-                  </td>
-                  <td className="py-3.5 px-4 text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button
-                        onClick={() => {
-                          setRestockTarget(item);
-                          setInwardQty("10");
-                          setInwardCost(item.purchasePrice ? String(item.purchasePrice) : "");
-                          setInwardRack(item.rackNumber || "");
-                        }}
-                        className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-semibold border border-emerald-500/30 flex items-center gap-1 cursor-pointer transition-colors"
-                        title="Quick Goods Inward / Restock"
-                      >
-                        <PlusCircle size={13} />
-                        <span>Restock</span>
-                      </button>
-                      <GlassButton
-                        size="sm"
-                        variant="secondary"
-                        icon={<Edit2 size={13} />}
-                        onClick={() => handleOpenEditModal(item)}
-                      >
-                        Edit
-                      </GlassButton>
-                    </div>
-                  </td>
                 </tr>
-              ))}
+              ) : (
+                filteredProducts.map((item) => (
+                  <tr
+                    key={item.id}
+                    className={`hover:bg-white/[0.04] transition-colors ${
+                      activeInventoryTab === "unconfirmed" && selectedUnconfirmedIds.has(item.id)
+                        ? "bg-amber-500/[0.06]"
+                        : ""
+                    }`}
+                  >
+                    {activeInventoryTab === "unconfirmed" && (
+                      <td className="py-3.5 px-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedUnconfirmedIds.has(item.id)}
+                          onChange={() => toggleSelectPart(item.id)}
+                          className="w-4 h-4 rounded cursor-pointer accent-amber-500"
+                        />
+                      </td>
+                    )}
+                    <td className="py-3.5 px-4 font-sans">
+                      <div className="font-semibold text-white flex items-center gap-2">
+                        <span>{item.name}</span>
+                        {item.isConfirmed === false && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono font-bold">
+                            UNCONFIRMED
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-mono">
+                        Barcode: {item.barcode || "N/A"}
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <span className="px-2 py-0.5 rounded-md bg-white/10 text-slate-200 font-sans font-medium text-[11px]">
+                        {item.brand}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4 text-sky-400 font-bold">
+                      <div>{item.partNumber}</div>
+                      {item.barcode ? (
+                        <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1 font-normal">
+                          <Barcode size={10} />
+                          {item.barcode}
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleTriggerPhoneScan({ partId: item.id, partName: item.name })}
+                          className="text-[10px] text-amber-400 hover:text-amber-300 font-mono flex items-center gap-1 font-normal cursor-pointer transition-colors"
+                          title="Scan and assign barcode"
+                        >
+                          <Smartphone size={10} />
+                          <span>+ Assign Barcode</span>
+                        </button>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-4 font-sans">
+                      {item.supplierName ? (
+                        <div>
+                          <div className="font-semibold text-white truncate max-w-[150px]" title={item.supplierName}>
+                            {item.supplierName}
+                          </div>
+                          <span className="text-[10px] text-emerald-400 font-mono font-bold">
+                            {item.supplierDiscount || 0}% purchase disc
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-slate-500 text-[11px]">Unassigned</span>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-4 font-sans text-slate-300 max-w-[180px] truncate" title={item.compatibleBikes}>
+                      {item.compatibleBikes || "Universal"}
+                    </td>
+                    <td className="py-3.5 px-4">
+                      {item.rackNumber && item.rackNumber !== "Unassigned" ? (
+                        <span className="px-2 py-0.5 rounded-md bg-sky-500/15 text-sky-300 border border-sky-400/25 font-bold font-mono">
+                          {item.rackNumber}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQuickRackTarget(item);
+                            setQuickRackValue("");
+                          }}
+                          className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/35 hover:bg-amber-500/30 text-[11px] font-bold font-mono flex items-center gap-1 cursor-pointer transition-colors"
+                          title="Click to assign rack location"
+                        >
+                          <AlertTriangle size={11} />
+                          <span>⚠️ Missing Rack</span>
+                        </button>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-4 font-bold text-white text-sm">
+                      {item.quantity}{" "}
+                      <span className="text-xs text-slate-400 font-normal">units</span>
+                    </td>
+                    <td className="py-3.5 px-4 font-bold text-white text-sm">
+                      {formatRupees(item.sellingPrice)}
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <GlassBadge status={item.status} />
+                    </td>
+                    <td className="py-3.5 px-4 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {activeInventoryTab === "unconfirmed" ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!item.rackNumber || item.rackNumber === "Unassigned") {
+                                  setQuickRackTarget(item);
+                                  setQuickRackValue("");
+                                } else {
+                                  handleSingleConfirm(item);
+                                }
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold border border-emerald-500/40 flex items-center gap-1 cursor-pointer transition-colors"
+                              title="Confirm and move to active catalog"
+                            >
+                              <CheckCircle2 size={13} />
+                              <span>Confirm</span>
+                            </button>
+                            <GlassButton
+                              size="sm"
+                              variant="secondary"
+                              icon={<Edit2 size={13} />}
+                              onClick={() => handleOpenEditModal(item)}
+                            >
+                              Edit
+                            </GlassButton>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => {
+                                setRestockTarget(item);
+                                setInwardQty("10");
+                                setInwardCost(item.purchasePrice ? String(item.purchasePrice) : "");
+                                setInwardRack(item.rackNumber || "");
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-semibold border border-emerald-500/30 flex items-center gap-1 cursor-pointer transition-colors"
+                              title="Quick Goods Inward / Restock"
+                            >
+                              <PlusCircle size={13} />
+                              <span>Restock</span>
+                            </button>
+                            <GlassButton
+                              size="sm"
+                              variant="secondary"
+                              icon={<Edit2 size={13} />}
+                              onClick={() => handleOpenEditModal(item)}
+                            >
+                              Edit
+                            </GlassButton>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -1514,6 +1867,77 @@ export default function InventoryView({
               </div>
             </form>
           </div>
+        </div>
+      )}
+      {/* Quick Rack Location & Single Confirmation Modal */}
+      {quickRackTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+          <GlassCard className="w-full max-w-md p-6 border-white/20 shadow-2xl relative">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-white/10">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <CheckCircle2 size={18} className="text-emerald-400" />
+                  Validate & Confirm Spare Part
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5 truncate max-w-[280px]">
+                  {quickRackTarget.name} (#{quickRackTarget.partNumber})
+                </p>
+              </div>
+              <button
+                onClick={() => setQuickRackTarget(null)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-xs text-slate-300">
+                Confirming this item activates it in the counter sales catalog. Assign or verify its warehouse shelf / rack location below:
+              </p>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                  Rack / Shelf Location (e.g. RACK-A1, BIN-04)
+                </label>
+                <input
+                  type="text"
+                  value={quickRackValue}
+                  onChange={(e) => setQuickRackValue(e.target.value)}
+                  placeholder="e.g. RACK-A1 or BIN-12"
+                  className="glass-input h-10 w-full px-3 rounded-xl text-xs font-mono text-slate-200 outline-none"
+                  autoFocus
+                />
+                <span className="text-[11px] text-slate-400 mt-1 block">
+                  Leave blank to retain current location or update later.
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
+                <GlassButton
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setQuickRackTarget(null)}
+                >
+                  Cancel
+                </GlassButton>
+                <GlassButton
+                  size="sm"
+                  variant="primary"
+                  disabled={isConfirmingSingle}
+                  icon={<CheckCircle2 size={14} />}
+                  onClick={() =>
+                    handleSingleConfirm(
+                      quickRackTarget,
+                      quickRackValue.trim() || undefined
+                    )
+                  }
+                >
+                  {isConfirmingSingle ? "Confirming..." : "Confirm & Move to Catalog"}
+                </GlassButton>
+              </div>
+            </div>
+          </GlassCard>
         </div>
       )}
     </div>

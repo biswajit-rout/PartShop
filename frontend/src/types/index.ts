@@ -30,6 +30,7 @@ export interface SparePart {
   mechanicDiscount: number;
   status: StockStatus;
   barcode: string;
+  isConfirmed?: boolean;
 }
 
 export interface Brand {
