@@ -33,9 +33,9 @@ If you prefer running services directly on your host machine without Docker:
 
 ## 2. Quick Start: Running the Application Locally
 
-### Option A: Running with Docker (Recommended)
+### Option A: Running Locally with Docker (Recommended)
 
-Docker Compose provides a single-command setup that starts the Next.js frontend and PostgreSQL database with persistent volume storage.
+Docker Compose provides a single-command local development setup that starts the Next.js frontend, FastAPI backend (with live `--reload`), and PostgreSQL database with persistent volume storage.
 
 #### 1. Clone the Repository
 ```bash
@@ -52,16 +52,15 @@ cp .env.example .env
 # On Windows (PowerShell)
 Copy-Item .env.example .env
 ```
-*(Default values in `.env.example` are pre-configured for instant local development).*
+*(Default values in `.env.example` are pre-configured for instant local development. For mobile phone QR scanning over Wi-Fi, set `HOST_LAN_IP` to your PC's Wi-Fi IPv4 address from `ipconfig`, e.g. `192.168.1.9`).*
 
-#### 3. Start the Application
+#### 3. Start the Local Stack
 Run Docker Compose in detached mode:
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
-*(Use `docker compose up -d --build` if you made changes to `Dockerfile` or added new packages to `requirements.txt`).*
 
-#### 4. Access the Services
+#### 4. Access Local Services
 - **Frontend Web UI**: [http://localhost:3000](http://localhost:3000)
 - **Backend API & Swagger Docs**: [http://localhost:8001/docs](http://localhost:8001/docs)
 - **Backend Health Check**: [http://localhost:8001/health](http://localhost:8001/health)
@@ -70,7 +69,7 @@ docker compose up -d
   - User: `partshop_user`  
   - Password: `partshop_secret_change_me`
 
-#### 5. Useful Docker Commands
+#### 5. Useful Local Docker Commands
 ```bash
 # View live container logs
 docker compose logs -f
@@ -90,7 +89,28 @@ docker compose down -v
 
 ---
 
-### Option B: Running Locally (Native / Bare Metal)
+### Option B: Running Production Stack with Docker (`docker-compose.prod.yml`)
+
+For production servers (VPS or shop host), use the hardened production Compose file with **Caddy 2** reverse proxy, automatic HTTPS, non-root containers, automatic Alembic migrations, and internal-only database/API ports:
+
+```bash
+# 1. Create production environment file and fill in strong secrets + domain
+cp .env.prod.example .env.prod
+
+# 2. Build and launch the production stack (Caddy + Frontend + Backend + Postgres)
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+
+# 3. Check container health
+docker compose -f docker-compose.prod.yml --env-file .env.prod ps
+```
+
+- Set `SITE_ADDRESS=pos.yourdomain.com` and `CORS_ORIGINS=https://pos.yourdomain.com` in `.env.prod` for automatic Let's Encrypt HTTPS.
+- Leave `SITE_ADDRESS=:80` to test the production stack locally at `http://localhost` or behind a Cloudflare Tunnel.
+- See [docs/deployment.md](docs/deployment.md) and [docs/docker-architecture.md](docs/docker-architecture.md) for full production, backup, and CI/CD guides.
+
+---
+
+### Option C: Running Locally (Native / Bare Metal)
 
 If you are developing frontend components and want instant hot-reloading outside containers:
 
@@ -151,10 +171,13 @@ PartShop/
 │   ├── api-reference.md    # API contracts & schemas
 │   └── changelog.md        # Historical change log
 │
-├── docker-compose.yml      # Multi-container orchestration (Frontend, Postgres, Backend)
-├── .env.example            # Environment variables configuration template
-├── README.md               # Quick start guide and software prerequisites
-└── AGENTS.md               # Strict developer & AI agent governance instructions
+├── Caddyfile                 # Production Caddy reverse proxy & automatic HTTPS routing
+├── docker-compose.yml        # Local development orchestration (Frontend, Postgres, Backend dev)
+├── docker-compose.prod.yml   # Production orchestration (Caddy, Frontend, Backend prod, Postgres)
+├── .env.example              # Local development environment template
+├── .env.prod.example         # Production environment template
+├── README.md                 # Quick start guide and software prerequisites
+└── AGENTS.md                 # Strict developer & AI agent governance instructions
 ```
 
 ---

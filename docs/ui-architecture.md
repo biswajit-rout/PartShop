@@ -36,12 +36,12 @@ The following matrix documents the exact versions, libraries, and integration me
 | **Bundler Mode** | Next.js Webpack engine (`--webpack`) | Turbopack / Default | **Implemented** (ensures Windows IPC stability) |
 | **Icons** | `lucide-react` 1.76.0 | Not specified | **Implemented** |
 | **Charts & Analytics**| `recharts` 3.11.0 | Not specified | **Implemented** |
-| **State Management** | React Local State (`useState`, `useEffect`) | TanStack / React Query | **Architectural Gap**: TanStack Query not yet installed |
-| **API Client** | Native Mock Data layer | Axios | **Architectural Gap**: Axios not yet installed |
+| **State Management** | React Local State (`useState`, `useEffect`) | TanStack / React Query | **Architectural Choice**: Native state + Modular API layer |
+| **API Client** | Modular Domain API Client (`src/api/`) | Axios | **Implemented**: Native `fetch` with modular domain services |
 | **Component Primitives**| Custom Atomic Liquid Glass Primitives | ShadCN UI Components | **Substituted**: Tailored in-house Liquid Glass suite |
-| **Backend REST API** | None (No server in repository) | FastAPI + Python 3.12 | **Planned / Not Implemented** |
-| **Database** | None (In-memory mock records) | PostgreSQL + SQLAlchemy + Alembic | **Planned / Not Implemented** |
-| **Authentication** | Hardcoded Admin profile mock | JWT + RBAC | **Planned / Not Implemented** |
+| **Backend REST API** | FastAPI Python REST API (Port 8001) | FastAPI + Python 3.12 | **Implemented** |
+| **Database** | PostgreSQL 16 (Docker) + SQLAlchemy 2.0 Async + Alembic | PostgreSQL + SQLAlchemy + Alembic | **Implemented** |
+| **Authentication** | JWT Token + Role-Based Guards (`ADMIN`, `STAFF`) | JWT + RBAC | **Implemented** |
 
 ---
 
@@ -69,10 +69,12 @@ flowchart TD
 
         subgraph ViewControllers["Domain View Controllers"]
             DV["DashboardView"]
+            SCV["SearchView"]
             IV["InventoryView"]
             BV["BillingView"]
             SV["SuppliersView"]
             MV["MechanicsView"]
+            EV["ExpensesView"]
             RV["ReportsView"]
             STV["SettingsView"]
         end
@@ -93,10 +95,10 @@ flowchart TD
         end
     end
 
-    subgraph PlannedBackend["Planned Backend Infrastructure (requirements.md)"]
-        FastAPI["FastAPI Python REST API (Not Yet Created)"]
-        PostgreSQL["PostgreSQL 16 Database (Not Yet Created)"]
-        StorageEngine["Local / S3 Storage (Not Yet Created)"]
+    subgraph LiveBackend["Live Backend Infrastructure (Docker Container Fleet)"]
+        FastAPI["FastAPI Python REST API (/api/v1/* on Host Port 8001)"]
+        PostgreSQL["PostgreSQL 16 Database (partshop-postgres:5432)"]
+        StorageEngine["PostgreSQL + Docker Volumes (partshop-pgdata)"]
     end
 
     DOM <--> RootPage
@@ -186,7 +188,7 @@ flowchart TD
 | `frontend/src/components/common/` | Shared page-level headings and title badges | UI Components |
 | `frontend/src/components/layout/` | Structural shells: `GlassSidebar` (navigation dock) and `GlassHeader` (topbar) | Layout Components |
 | `frontend/src/components/ui/glass/` | Atomic liquid glass primitives (`LiquidBackground`, `GlassCard`, `GlassInput`, etc.)| Presentation Components |
-| `frontend/src/components/views/` | Seven discrete domain modules (`Dashboard`, `Inventory`, `Billing`, etc.) | Feature Module Views |
+| `frontend/src/components/views/` | Eight discrete domain modules (`Dashboard`, `Search`, `Inventory`, `Billing`, etc.) | Feature Module Views |
 
 ---
 
@@ -201,10 +203,12 @@ The current frontend operates as an **App Router SPA (Single Page Application)**
   ```typescript
   export type NavigationSection =
     | "Dashboard"
+    | "Search"
     | "Inventory"
     | "Billing"
     | "Suppliers"
     | "Mechanics"
+    | "Expenses"
     | "Reports"
     | "Settings";
   ```
@@ -216,13 +220,16 @@ For high-speed counter POS terminals, full page transitions that cause network r
 
 | URL Route | Rendered Component | Component Type | Current Implementation State |
 | :--- | :--- | :--- | :--- |
-| `/` (Default: Dashboard) | `DashboardView` | Client Component | **Implemented** (KPIs, Charts, Stock Alerts) |
+| `/` (Default: Dashboard) | `DashboardView` | Client Component | **Implemented** (KPIs, Weekly Sales vs Purchase AreaChart, Stock Alerts) |
+| `/` (Tab: Search) | `SearchView` | Client Component | **Implemented** (Dedicated Search Bar, Automotive Stems, Spare Part Cards) |
 | `/` (Tab: Inventory) | `InventoryView` | Client Component | **Implemented** (Catalog, Filters, Excel Spec) |
-| `/` (Tab: Billing) | `BillingView` | Client Component | **Implemented** (POS Barcode Billing, GST, Commission) |
+| `/` (Tab: Billing) | `BillingView` | Client Component | **Implemented** (Clean POS Barcode Billing, GST, Commission, Settlement) |
 | `/` (Tab: Suppliers) | `SuppliersView` | Client Component | **Implemented** (Wholesaler Cards, GSTIN) |
 | `/` (Tab: Mechanics) | `MechanicsView` | Client Component | **Implemented** (Commission Accounts Ledger) |
+| `/` (Tab: Expenses) | `ExpensesView` | Client Component | **Implemented** (Daily Expenses Ledger, Net Profit KPI, Category Breakdown, "+ Record Expense" Modal) |
 | `/` (Tab: Reports) | `ReportsView` | Client Component | **Implemented** (Report Cards, PDF/XLSX triggers) |
 | `/` (Tab: Settings) | `SettingsView` | Client Component | **Implemented** (Shop Profile, Thermal Config) |
+| `/scan` | `MobileScanPage` (`src/app/scan/page.tsx`) | Client Component | **Implemented** (Mobile Camera Barcode Scanner, WebSockets Hub, Audio Beep & Haptics) |
 | `/_not-found` | Built-in Next.js 404 | Server Component | **Implemented** (Static fallback) |
 
 ---
@@ -235,14 +242,18 @@ The following diagram maps the parent-child component hierarchy starting from th
 flowchart TD
     RootLayout["RootLayout (layout.tsx)"]
     Home["Home (page.tsx) ['use client']"]
+    ScannerProvider["ScannerProvider (context/ScannerContext.tsx)"]
     
     LiquidBG["LiquidBackground"]
-    GlassSidebar["GlassSidebar"]
-    GlassHeader["GlassHeader"]
+    GlassSidebar["GlassSidebar (User Profile & Logout)"]
+    GlassHeader["GlassHeader (Instant Search Autocomplete & Phone Indicator Pill & Logout)"]
+    MobileScannerModal["MobileScannerModal (Pairing QR + Device Roster)"]
     
     DashboardView["DashboardView"]
-    InventoryView["InventoryView"]
-    BillingView["BillingView"]
+    SearchView["SearchView (Hero Search + Fast Inward Restock)"]
+    ExpensesView["ExpensesView (Operating Expenses & Daily Profit Engine)"]
+    InventoryView["InventoryView (Catalog + Barcode Auto-Fill)"]
+    BillingView["BillingView (POS + Mobile Hands-Free Billing)"]
     SuppliersView["SuppliersView"]
     MechanicsView["MechanicsView"]
     ReportsView["ReportsView"]
@@ -257,13 +268,16 @@ flowchart TD
     Recharts["Recharts (AreaChart, PieChart)"]
 
     RootLayout --> Home
-    Home --> LiquidBG
-    Home --> GlassSidebar
-    Home --> GlassHeader
+    Home --> ScannerProvider
+    ScannerProvider --> LiquidBG
+    ScannerProvider --> MobileScannerModal
+    ScannerProvider --> GlassSidebar
+    ScannerProvider --> GlassHeader
     
-    Home --> DashboardView
-    Home --> InventoryView
-    Home --> BillingView
+    ScannerProvider --> DashboardView
+    ScannerProvider --> SearchView
+    ScannerProvider --> InventoryView
+    ScannerProvider --> BillingView
     Home --> SuppliersView
     Home --> MechanicsView
     Home --> ReportsView
@@ -329,28 +343,56 @@ The seven domain views in `src/components/views/` correspond directly to the fun
 - **Top Movers**: Ranked list of highest volume turnaround spare parts.
 
 ### 7.2 Inventory Module (`InventoryView.tsx`)
-- **Live Search & Filtering**: Multi-field client search against item name, brand, part number, model number, compatible bikes, and rack location.
-- **Brand & Stock Facets**: Dropdown filters for brands (`Hero`, `Honda`, `TVS`, `Rollon`, `Castrol`, `Local`) and statuses (`In Stock`, `Low Stock`, `Out of Stock`).
-- **Excel Import Specification**: Toggled alert banner documenting the required 12-column `.xlsx` schema matching backend requirements.
-- **Export Stubs**: Action triggers for Excel (`.xlsx`), CSV, and PDF exports.
-- **Rack Location Indexing**: High-visibility pill badges displaying warehouse rack bins (e.g. `RACK-A-01`).
+Features a 3-sub-tab catalog confirmation, staging & soft-delete lifecycle architecture:
+1. **🟢 Confirmed Items Sub-Tab**:
+   - Displays all validated, verified spare parts that are active for POS counter sales and barcode gun scanning.
+   - Shows live count badge (`{confirmedCount}`) with verified status pill.
+   - Real-time multi-token automotive search and brand/supplier/status dropdown filters.
+   - Fast Restock (Goods Inward) modal, full part editing modal, and soft delete action (moves part to Recycle Bin).
+2. **🟡 Unconfirmed / Bulk Uploads Sub-Tab**:
+   - Dedicated staging queue where parts imported from Excel workbooks (.xlsx) automatically land (`is_confirmed = False`).
+   - Visibly badged as `🟡 Unconfirmed`.
+   - **Sales & Restock Lock**: Completely locked from POS billing (counter autocomplete search and barcode scanning reject with error toast) and blocked from restock in UI. Excluded from top header search and dedicated Search view.
+   - Dynamic counter badge (`{unconfirmedCount}`) with pulsing animation when items require verification.
+   - **Multi-Selection Checkbox Controls**: Table header master checkbox to select/deselect all visible items, plus individual row checkboxes.
+   - **Floating / Sticky Batch Action Bar**: Displays selected item count with:
+     - `Delete Selected (X)`: Atomic bulk soft-deletion to Recycle Bin.
+     - `Confirm Selected (X) & Move to Catalog`: Atomic bulk confirmation to active sales catalog.
+   - **Rack Location Verification**: Unassigned items display a prominent amber `⚠️ Missing Rack` button that triggers a quick rack assignment & confirmation modal.
+   - **Row Actions**: Single-click Confirm, Edit, and Delete (moves item to Recycle Bin).
+3. **🔴 Deleted Items / Recycle Bin Sub-Tab**:
+   - Displays soft-deleted parts (`is_deleted = True`, `deleted_at != null`).
+   - Badged as `🔴 Deleted` with deletion timestamp.
+   - Checkbox multi-selection with floating action bar: `Restore Selected (X)`.
+   - Single-row `🔄 Restore` action returning part to active catalog.
+- **Brand Master Modal**: Live brand creation and default customer/mechanic discount percentage editor.
+- **Excel Import Specification**: Upload modal supporting supplier mapping, brand overrides, and purchase discount auto-calculations.
 
 ### 7.3 POS & Billing Module (`BillingView.tsx`)
-- **Customer & Payment Meta**: Input fields for customer name and payment type (`Cash`, `UPI`, `Card`, `Credit / Khata`).
-- **Mechanic Partner Attribution**: Dropdown selection associating bills with mechanic partners to auto-calculate commission percentages.
-- **Barcode Rapid Add**: Form listener supporting hardware USB/Bluetooth barcode scanners. Matches against EAN-13 barcodes or alphanumeric part numbers.
-- **Line Items Grid**: Interactive row items with quantity steppers, percentage discount overrides, line subtotal calculations, and item deletion.
-- **GST & Summary Ledger**: Real-time financial calculations:
-  - Taxable Value (Subtotal)
-  - Integrated GST (18% automotive standard)
-  - Commission deduction for assigned mechanic
-  - Grand Total formatted in Indian numbering (`₹`)
-- **Hardware Integration**: Trigger for thermal printer invocation (`window.print()`) with print-media style isolation.
+Features a 2-sub-tab architecture:
+1. **New Bill / POS Counter Sub-Tab**:
+   - **Customer & Payment Meta**: Input fields for customer name and payment type (`Cash`, `UPI`, `Card`, `Credit / Khata`).
+   - **Mechanic Partner Attribution**: Dropdown selection associating bills with mechanic partners to auto-calculate commission percentages.
+   - **Barcode Rapid Add**: Form listener supporting hardware USB/Bluetooth barcode scanners. Matches against EAN-13 barcodes or alphanumeric part numbers.
+   - **Line Items Grid**: Interactive row items with quantity steppers, percentage discount overrides, line subtotal calculations, and item deletion.
+   - **GST & Summary Ledger**: Real-time financial calculations (Taxable Subtotal, 18% GST, Mechanic Commission, Grand Total in `₹`).
+   - **Hardware Integration**: Trigger for thermal printer invocation (`window.print()`).
+2. **Invoices History Sub-Tab**:
+   - **Invoice Directory**: Chronological listing of past counter sales invoices with keyword search (by invoice #, customer name, phone).
+   - **Date Range Filters**: Temporal preset buttons ("All Time", "Today", "This Week", "This Month", "Custom Range") and datetime range pickers.
+   - **Status Tabs**: Quick filtering across `All Invoices`, `🟢 Active (Completed)`, and `🔴 Voided / Returned`.
+   - **Receipt Inspector & Reprint**: One-click modal to inspect line items, discounts, taxes, and reprint thermal receipts (displaying a prominent VOID watermark when applicable).
+   - **Modify Invoice & Items Modal**: Comprehensive editing modal allowing cashiers to correct customer typos, change payment methods, adjust quantities with +/- steppers, edit line-item discounts, remove individual items, or search and add new parts to an existing invoice, with real-time total recalculations and automated inventory stock level adjustments.
+   - **Return Items & Void Modal**: Dedicated modal displaying the items that will be returned to inventory, capturing an audit reason, and executing `POST /billing/invoices/{invoice_id}/cancel`.
 
 ### 7.4 Supplier Module (`SuppliersView.tsx`)
 - **Directory Grid**: Cards detailing wholesale distributor credentials.
 - **Compliance Tracking**: Displays formal GSTIN numbers (e.g., `29ABCDE1234F1Z5`), primary contact persons, phone numbers, and physical warehouse addresses.
 - **Purchase Order Tracking**: Displays total purchase order counts and purchase invoice ledger view triggers.
+- **View Items Modal with Daily Inward Valuation**:
+  - **Date Filter Dropdown**: Allows filtering parts entered on specific days (e.g. `2026-11-28 (15 items)`) or `All Entry Dates`.
+  - **Daily Inward KPI Banner**: Displays 4 real-time valuation metrics: Filtered SKUs count, Total Inward Units, Total Stock Cost Valuation (₹ purchase cost), and Total Retail MRP (₹ selling price).
+  - **Parts Table**: Detailed listing with OEM Part #, Description, Brand, Compatibility, Supplier Discount %, Cost Price, MRP, Stock Level, and formatted `Entry Date` column.
 
 ### 7.5 Mechanic Module (`MechanicsView.tsx`)
 - **Partner Registry**: Table of affiliated workshops (garage name, proprietor name, contact mobile).

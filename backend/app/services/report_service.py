@@ -1,15 +1,17 @@
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timezone, timedelta
 from decimal import Decimal
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.sale import Sale, SaleItem
+from app.models.sale import Sale, SaleItem, SaleStatus
 from app.models.spare_part import SparePart
+from app.models.stock_movement import StockMovement, StockMovementType
 from app.schemas.reports import (
     DailySalesSummary,
     PaymentBreakdown,
     TopSellingPart,
     LowStockItem,
+    WeeklyTrendPoint,
 )
 
 
@@ -40,7 +42,11 @@ class ReportService:
                           Decimal("0.00")).label("total_tax"),
             func.coalesce(func.sum(Sale.grand_total),
                           Decimal("0.00")).label("grand_total"),
-        ).where(Sale.created_at >= start_datetime, Sale.created_at <= end_datetime)
+        ).where(
+            Sale.created_at >= start_datetime,
+            Sale.created_at <= end_datetime,
+            Sale.status == SaleStatus.COMPLETED,
+        )
 
         summary_res = await self.db.execute(summary_stmt)
         row = summary_res.one()
@@ -53,7 +59,11 @@ class ReportService:
                 func.coalesce(func.sum(Sale.grand_total),
                               Decimal("0.00")).label("total_amount"),
             )
-            .where(Sale.created_at >= start_datetime, Sale.created_at <= end_datetime)
+            .where(
+                Sale.created_at >= start_datetime,
+                Sale.created_at <= end_datetime,
+                Sale.status == SaleStatus.COMPLETED,
+            )
             .group_by(Sale.payment_method)
         )
 
@@ -91,6 +101,8 @@ class ReportService:
                               Decimal("0.00")).label("total_revenue"),
             )
             .join(SaleItem, SaleItem.spare_part_id == SparePart.id)
+            .join(Sale, SaleItem.sale_id == Sale.id)
+            .where(Sale.status == SaleStatus.COMPLETED)
             .group_by(SparePart.id)
             .order_by(func.sum(SaleItem.quantity).desc())
             .limit(limit)
@@ -131,3 +143,64 @@ class ReportService:
             )
             for p in parts
         ]
+
+    async def get_weekly_trend(self) -> list[WeeklyTrendPoint]:
+        """Calculates 7-day rolling sales vs purchase trend for financial flow charts."""
+        today = date.today()
+        start_date = today - timedelta(days=6)
+        start_dt = datetime.combine(start_date, time.min).replace(tzinfo=timezone.utc)
+
+        # 1. Query sales grouped by date (excluding voided sales)
+        sales_stmt = (
+            select(
+                func.date(Sale.created_at).label("sale_date"),
+                func.coalesce(func.sum(Sale.grand_total), Decimal("0.00")).label("day_sales"),
+            )
+            .where(Sale.created_at >= start_dt, Sale.status == SaleStatus.COMPLETED)
+            .group_by(func.date(Sale.created_at))
+        )
+        sales_res = await self.db.execute(sales_stmt)
+        # Note: func.date in asyncpg/Postgres returns datetime.date or str
+        sales_by_date = {}
+        for r in sales_res.all():
+            d_key = r.sale_date if isinstance(r.sale_date, date) else date.fromisoformat(str(r.sale_date))
+            sales_by_date[d_key] = r.day_sales
+
+        # 2. Query purchases from StockMovement (PURCHASE_IN) grouped by date
+        purch_stmt = (
+            select(
+                func.date(StockMovement.created_at).label("purch_date"),
+                func.coalesce(
+                    func.sum(StockMovement.quantity_change * SparePart.purchase_price),
+                    Decimal("0.00")
+                ).label("day_purch"),
+            )
+            .join(SparePart, SparePart.id == StockMovement.spare_part_id)
+            .where(
+                StockMovement.created_at >= start_dt,
+                StockMovement.movement_type == StockMovementType.PURCHASE_IN,
+            )
+            .group_by(func.date(StockMovement.created_at))
+        )
+        purch_res = await self.db.execute(purch_stmt)
+        purch_by_date = {}
+        for r in purch_res.all():
+            d_key = r.purch_date if isinstance(r.purch_date, date) else date.fromisoformat(str(r.purch_date))
+            purch_by_date[d_key] = r.day_purch
+
+        # 3. Build ordered 7-day array
+        trend: list[WeeklyTrendPoint] = []
+        day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        for offset in range(7):
+            cur_date = start_date + timedelta(days=offset)
+            cur_sales = sales_by_date.get(cur_date, Decimal("0.00"))
+            cur_purch = purch_by_date.get(cur_date, Decimal("0.00"))
+            trend.append(
+                WeeklyTrendPoint(
+                    day=day_names[cur_date.weekday()],
+                    date=cur_date,
+                    sales=cur_sales,
+                    purchase=cur_purch,
+                )
+            )
+        return trend

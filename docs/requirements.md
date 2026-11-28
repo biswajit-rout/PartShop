@@ -224,6 +224,77 @@ Exports:
 
 ---
 
+---
+
+## Item Brands Master Management
+
+Manage genuine and aftermarket manufacturer brands:
+
+### Brand Attributes
+- `id`
+- `name` (e.g. Hero, Bajaj, TVS, Honda, Yamaha, Bosch, Endurance, Castrol, Minda)
+- `code` (e.g. HERO, BAJ, BOSCH)
+- `description`
+- `created_at`
+- `updated_at`
+
+### Features
+- Register new manufacturer/item brands.
+- Update brand details and codes.
+- Dynamic brand assignment in spare parts catalog and Excel bulk import.
+- Brand-specific commission calculation for mechanics.
+
+---
+
+## Mechanic Partners & Brand Commission Matrix
+
+Enterprise garage and mechanic partner commission tracking:
+
+### Mechanic Attributes
+- `id`
+- `name`
+- `phone` (unique)
+- `garage_name`
+- `address`
+- `default_commission_percentage` (fallback percentage, e.g. 5%)
+- `is_active`
+
+### Brand Commission Overrides
+- Specific percentage per mechanic and per brand (`mechanic_brand_commissions` table).
+- Example: Mechanic "Ramesh Auto Care" receives:
+  - Hero: 8.0%
+  - Bajaj: 10.0%
+  - Endurance: 12.0%
+  - All other brands: 5.0% (Default)
+
+### Mechanic Date-Wise Item Ledger & Sales Audit
+- Open any mechanic's details to see complete history of items taken or sold through the shop.
+- Date-wise itemized view:
+  - Sale Date & Time
+  - Invoice Number
+  - Part Name & OEM SKU
+  - Brand
+  - Quantity Taken
+  - Unit Price & Line Total
+  - Commission Percentage Applied
+  - Commission Payout Amount (₹)
+  - Customer & Vehicle Reference
+- Summary Performance KPIs:
+  - Total Parts Taken (units)
+  - Total Billing Volume (₹)
+  - Total Commission Earned (₹)
+- Date range filtering (All time, Today, Last 7 Days, Last 30 Days, Custom Range).
+
+---
+
+## Part Update & Stock Adjustment
+
+- Full CRUD capability on spare parts catalog.
+- Edit part name, OEM part number, model number, brand, bike models, selling price, purchase price, stock quantity, min stock alert, rack location, and barcode.
+- Automated `StockMovement` audit tracking when quantity is adjusted manually.
+
+---
+
 ## Billing System
 
 Features:
@@ -232,16 +303,19 @@ Features:
 - Thermal Printer Support
 - A4 Invoice Download
 - PDF Invoice Download
-- GST Ready Structure
-- Barcode\-Based Billing
+- GST Ready Structure (18% integrated)
+- Barcode-Based Billing
+- **Bike Model Search Autocomplete**: Cashier can type bike model name (e.g. 'Pulsar 150', 'Splendor Plus', 'Activa 6G') to instantly find and add compatible parts to the bill.
+- **Mechanic Partner Attribution**: Assign a mechanic at checkout; system automatically calculates line-item commission based on each item's brand rate and credits the mechanic.
 
 When a bill is generated:
 
 1. Create invoice.
-2. Deduct stock automatically.
-3. Create stock movement entry.
-4. Update daily transaction ledger.
-5. Calculate mechanic commission if applicable.
+2. Deduct stock automatically with row-level locks (`with_for_update()`).
+3. Create immutable stock movement entry (`SALE_OUT`).
+4. Calculate mechanic commission per brand if mechanic is assigned.
+5. Record line-item commission percentages and payouts.
+6. Update daily transaction ledger.
 
 ---
 

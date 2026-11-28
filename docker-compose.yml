@@ -1,11 +1,13 @@
 services:
   # =========================================================================
-  # Frontend Service: Next.js 16 (App Router + Liquid Glass UI)
+  # Frontend Service: Next.js 16 Standalone (Local Development)
   # =========================================================================
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001/api/v1}
     container_name: partshop-frontend
     restart: unless-stopped
     ports:
@@ -14,7 +16,13 @@ services:
       - NODE_ENV=production
       - PORT=3000
       - HOSTNAME=0.0.0.0
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8001/api/v1}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     networks:
       - partshop-network
 
@@ -44,32 +52,41 @@ services:
       - partshop-network
 
   # =========================================================================
-  # Backend Service: FastAPI Python REST API
+  # Backend Service: FastAPI Python REST API & WebSocket Gateway (Hot-Reload)
   # =========================================================================
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      target: dev
     container_name: partshop-backend
     restart: unless-stopped
     ports:
       # Maps host port 8001 to container port 8000 to prevent port 8000 conflicts
       - "${BACKEND_PORT:-8001}:8000"
     volumes:
-      # Live hot-reloading: edits in ./backend in VS Code reflect instantly in Docker
+      # Live hot-reloading: edits in ./backend reflect instantly in Docker
       - ./backend:/app
     environment:
       - ENVIRONMENT=development
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-partshop_user}:${POSTGRES_PASSWORD:-partshop_secret_change_me}@postgres:5432/${POSTGRES_DB:-partshop_db}
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_USER=${POSTGRES_USER:-partshop_user}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-partshop_secret_change_me}
       - POSTGRES_DB=${POSTGRES_DB:-partshop_db}
       - SECRET_KEY=${BACKEND_SECRET_KEY:-partshop_default_jwt_secret_key_change_in_production}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      - CORS_ORIGIN_REGEX=${CORS_ORIGIN_REGEX:-^http://(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)[0-9.]+:3000$}
+      - HOST_LAN_IP=${HOST_LAN_IP:-}
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - partshop-network
 

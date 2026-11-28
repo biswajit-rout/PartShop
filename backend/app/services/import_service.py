@@ -3,23 +3,33 @@ from decimal import Decimal
 import openpyxl
 from fastapi import UploadFile, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.spare_part import SparePart
+from app.models.supplier import Supplier, SupplierBrandDiscount
+from app.models.brand import Brand
 from app.models.stock_movement import StockMovement, StockMovementType
 from app.schemas.imports import ImportSummaryResponse, RowErrorDetail
 
 
 class ImportService:
     """
-    Service for parsing, validating, and bulk-importing
-    spare parts catalogs from Excel (.xlsx) workbooks.
+    Intelligent Service for parsing, validating, and bulk-importing
+    spare parts catalogs and distributor bills (such as Honda Compatibility Sheets)
+    from Excel (.xlsx) workbooks.
     """
 
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def import_parts_from_excel(self, file: UploadFile) -> ImportSummaryResponse:
+    async def import_parts_from_excel(
+        self,
+        file: UploadFile,
+        supplier_id: int | None = None,
+        brand_name_override: str | None = None,
+        default_supplier_discount: Decimal | None = None,
+    ) -> ImportSummaryResponse:
         # 1. Validate file extension
         if not file.filename or not file.filename.endswith((".xlsx", ".xlsm")):
             raise HTTPException(
@@ -27,11 +37,37 @@ class ImportService:
                 detail="Invalid file format. Please upload an Excel file ending with .xlsx.",
             )
 
+        # Look up supplier details and brand discounts matrix if supplier_id was passed
+        supplier_name: str | None = None
+        supplier_default_disc: Decimal = Decimal("0.00")
+        supplier_brand_discounts: dict[str, Decimal] = {}
+        if supplier_id:
+            supp_res = await self.db.execute(
+                select(Supplier)
+                .options(
+                    selectinload(Supplier.brand_discounts).selectinload(SupplierBrandDiscount.brand)
+                )
+                .where(Supplier.id == supplier_id)
+            )
+            supplier = supp_res.scalar_one_or_none()
+            if supplier:
+                supplier_name = supplier.name
+                supplier_default_disc = supplier.default_discount_percentage
+                for bd in supplier.brand_discounts:
+                    if bd.brand and bd.brand.name:
+                        supplier_brand_discounts[bd.brand.name.strip().lower()] = bd.discount_percentage
+
+        # Pre-cache brand-level default customer and mechanic selling discounts
+        all_brands_res = await self.db.execute(select(Brand))
+        brand_selling_discounts: dict[str, tuple[Decimal, Decimal]] = {
+            b.name.strip().lower(): (b.default_customer_discount, b.default_mechanic_discount)
+            for b in all_brands_res.scalars().all()
+        }
+
         # 2. Read file bytes into memory
         contents = await file.read()
         try:
-            workbook = openpyxl.load_workbook(
-                io.BytesIO(contents), data_only=True)
+            workbook = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -49,31 +85,76 @@ class ImportService:
             )
 
         # 3. Read & normalize header row (Row 1)
-        headers: dict[str, int] = {}
+        raw_headers: dict[str, int] = {}
         header_row = [cell.value for cell in sheet[1]]
         for idx, col_name in enumerate(header_row):
             if col_name:
-                normalized = str(col_name).strip().lower().replace(" ", "_")
-                headers[normalized] = idx
+                normalized = (
+                    str(col_name)
+                    .strip()
+                    .lower()
+                    .replace(" ", "_")
+                    .replace("-", "_")
+                    .replace(".", "")
+                )
+                raw_headers[normalized] = idx
 
-        # Allow 'brand' as alias for 'brand_name'
-        if "brand" in headers and "brand_name" not in headers:
-            headers["brand_name"] = headers["brand"]
+        # Flexible Header Alias Resolution Dictionary
+        alias_map: dict[str, list[str]] = {
+            "part_number": [
+                "part_number", "part_no", "part_#", "part_num", "sku", "oem_number", "part_id"
+            ],
+            "item_name": [
+                "item_name", "description", "part_description", "item_description", "part_name", "name"
+            ],
+            "brand_name": [
+                "brand_name", "brand", "make", "manufacturer"
+            ],
+            "compatible_bikes": [
+                "compatible_bikes", "compatible_vehicle_model", "vehicle_model",
+                "compatible_model", "bike_model", "model_compatibility", "models"
+            ],
+            "selling_price": [
+                "selling_price", "price_(mrp)", "price_mrp", "mrp", "price", "retail_price", "rate", "mrp_price"
+            ],
+            "purchase_price": [
+                "purchase_price", "cost_price", "dealer_price", "purchase_rate", "cost"
+            ],
+            "quantity": [
+                "quantity", "qty", "stock", "opening_stock", "units"
+            ],
+            "discount": [
+                "discount", "disc", "trade_discount", "distributor_discount"
+            ],
+            "rack_number": [
+                "rack_number", "rack", "shelf", "bin", "location"
+            ],
+            "barcode": [
+                "barcode", "barcode_no", "ean", "upc"
+            ],
+            "model_number": [
+                "model_number", "model_no"
+            ],
+        }
 
-        # Verify mandatory columns
-        required_headers = ["item_name", "brand_name",
-                            "part_number", "purchase_price", "selling_price"]
-        missing = [h for h in required_headers if h not in headers]
-        if missing:
+        resolved_headers: dict[str, int] = {}
+        for canonical, aliases in alias_map.items():
+            for alias in aliases:
+                if alias in raw_headers:
+                    resolved_headers[canonical] = raw_headers[alias]
+                    break
+
+        # Verify core essential columns
+        if "part_number" not in resolved_headers or "item_name" not in resolved_headers:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    f"Missing required columns in Excel sheet: {', '.join(missing)}. "
-                    f"Detected columns: {', '.join(headers.keys())}."
+                    f"Could not find Part Number and Description headers. "
+                    f"Detected columns: {', '.join(raw_headers.keys())}."
                 ),
             )
 
-        # 4. Cache existing part numbers and barcodes (O(1) duplicate checks)
+        # 4. Cache existing part numbers and barcodes for O(1) duplicate checks
         existing_part_res = await self.db.execute(select(SparePart.part_number))
         existing_part_numbers = set(existing_part_res.scalars().all())
 
@@ -92,93 +173,161 @@ class ImportService:
 
         # 5. Process each data row (Row 2 onwards)
         for row_idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
-            # Skip if row is completely empty
             if not any(row):
                 continue
 
-            total_rows += 1
-
             def get_val(key: str, default=None):
-                col_i = headers.get(key)
+                col_i = resolved_headers.get(key)
                 if col_i is not None and col_i < len(row):
                     val = row[col_i]
                     return val if val is not None else default
                 return default
 
-            item_name = str(get_val("item_name", "")).strip()
-            brand_name = str(get_val("brand_name", "")).strip()
             part_number = str(get_val("part_number", "")).strip()
+
+            # Skip summary / total rows at bottom of distributor sheets
+            if not part_number or part_number.upper() in ["GRAND TOTAL", "TOTAL", "SUBTOTAL", "SUMMARY", "TOTALS"]:
+                continue
+
+            total_rows += 1
+
+            item_name = str(get_val("item_name", "")).strip()
             barcode = str(get_val("barcode", "")).strip() or None
+            compatible_bikes = str(get_val("compatible_bikes", "")).strip() or None
 
-            # Validation: Missing primary text fields
-            if not item_name or not brand_name or not part_number:
-                errors.append(RowErrorDetail(
-                    row_number=row_idx,
-                    part_number=part_number or None,
-                    reason="item_name, brand_name, and part_number cannot be empty.",
-                ))
+            # Infer brand if not provided
+            brand_name = (
+                brand_name_override.strip()
+                if brand_name_override and brand_name_override.strip()
+                else str(get_val("brand_name", "")).strip()
+            )
+            if not brand_name:
+                if compatible_bikes and "honda" in compatible_bikes.lower():
+                    brand_name = "Honda"
+                elif "honda" in item_name.lower():
+                    brand_name = "Honda"
+                else:
+                    brand_name = "OEM Genuine"
+
+            if not item_name or not part_number:
+                errors.append(
+                    RowErrorDetail(
+                        row_number=row_idx,
+                        part_number=part_number or None,
+                        reason="Part Number and Description cannot be blank.",
+                    )
+                )
                 skipped_count += 1
                 continue
 
-            # Validation: Duplicate part number
+            # Check duplicate part number in catalog
             if part_number in existing_part_numbers or part_number in batch_part_numbers:
-                errors.append(RowErrorDetail(
-                    row_number=row_idx,
-                    part_number=part_number,
-                    reason=f"Part number '{part_number}' already exists in database or spreadsheet.",
-                ))
+                errors.append(
+                    RowErrorDetail(
+                        row_number=row_idx,
+                        part_number=part_number,
+                        reason=f"Part number '{part_number}' already exists in catalog or sheet.",
+                    )
+                )
                 skipped_count += 1
                 continue
 
-            # Validation: Duplicate barcode
+            # Check duplicate barcode
             if barcode and (barcode in existing_barcodes or barcode in batch_barcodes):
-                errors.append(RowErrorDetail(
-                    row_number=row_idx,
-                    part_number=part_number,
-                    reason=f"Barcode '{barcode}' already registered in database or spreadsheet.",
-                ))
+                errors.append(
+                    RowErrorDetail(
+                        row_number=row_idx,
+                        part_number=part_number,
+                        reason=f"Barcode '{barcode}' is already registered in catalog.",
+                    )
+                )
                 skipped_count += 1
                 continue
 
-            # Validation: Numeric fields
+            # Pricing and Discount Resolution
             try:
-                purchase_price = Decimal(str(get_val("purchase_price", 0)))
-                selling_price = Decimal(str(get_val("selling_price", 0)))
+                raw_selling = get_val("selling_price", 0)
+                selling_price = Decimal(str(raw_selling or 0))
+
+                # Determine supplier discount percentage
+                brand_key = brand_name.strip().lower()
+                raw_discount = get_val("discount")
+                if raw_discount is not None and str(raw_discount).strip() != "":
+                    val = Decimal(str(raw_discount))
+                    if val > 1:
+                        supplier_discount = round(val, 2)
+                        discount_rate = val / Decimal("100.00")
+                    else:
+                        supplier_discount = round(val * Decimal("100.00"), 2)
+                        discount_rate = val
+                elif brand_key in supplier_brand_discounts:
+                    # Multi-brand supplier discount matrix match
+                    supplier_discount = supplier_brand_discounts[brand_key]
+                    discount_rate = supplier_discount / Decimal("100.00")
+                elif default_supplier_discount is not None and default_supplier_discount > 0:
+                    supplier_discount = round(Decimal(str(default_supplier_discount)), 2)
+                    discount_rate = supplier_discount / Decimal("100.00")
+                elif supplier_default_disc > 0:
+                    supplier_discount = supplier_default_disc
+                    discount_rate = supplier_default_disc / Decimal("100.00")
+                else:
+                    supplier_discount = Decimal("0.00")
+                    discount_rate = Decimal("0.00")
+
+                raw_purchase = get_val("purchase_price")
+                if raw_purchase is not None and str(raw_purchase).strip() != "":
+                    purchase_price = Decimal(str(raw_purchase))
+                elif discount_rate > 0 and selling_price > 0:
+                    # Automatically compute dealer cost after wholesale discount
+                    purchase_price = round(selling_price * (Decimal("1.00") - discount_rate), 2)
+                else:
+                    # Default conservative 85% trade cost
+                    purchase_price = round(selling_price * Decimal("0.85"), 2)
+
                 quantity = int(get_val("quantity", 0) or 0)
                 min_stock_alert = int(get_val("min_stock_alert", 5) or 5)
-                cust_disc = Decimal(str(get_val("customer_discount", 0) or 0))
-                mech_disc = Decimal(str(get_val("mechanic_discount", 0) or 0))
             except Exception as e:
-                errors.append(RowErrorDetail(
-                    row_number=row_idx,
-                    part_number=part_number,
-                    reason=f"Invalid numeric format: {str(e)}",
-                ))
+                errors.append(
+                    RowErrorDetail(
+                        row_number=row_idx,
+                        part_number=part_number,
+                        reason=f"Invalid numeric pricing or quantity format: {str(e)}",
+                    )
+                )
                 skipped_count += 1
                 continue
 
-            # Create new catalog item
+            # Resolve default selling discounts from Brand
+            brand_key = brand_name.strip().lower()
+            default_cust_disc, default_mech_disc = brand_selling_discounts.get(
+                brand_key, (Decimal("0.00"), Decimal("0.00"))
+            )
+
+            # Instantiate SparePart with mapped supplier attributes
             new_part = SparePart(
                 item_name=item_name,
                 brand_name=brand_name,
                 part_number=part_number,
                 model_number=str(get_val("model_number", "")).strip() or None,
-                compatible_bikes=str(
-                    get_val("compatible_bikes", "")).strip() or None,
+                compatible_bikes=compatible_bikes,
+                supplier_id=supplier_id,
+                supplier_name=supplier_name,
+                supplier_discount=supplier_discount,
                 quantity=quantity,
                 min_stock_alert=min_stock_alert,
                 rack_number=str(get_val("rack_number", "")).strip() or None,
                 purchase_price=purchase_price,
                 selling_price=selling_price,
-                customer_discount=cust_disc,
-                mechanic_discount=mech_disc,
+                customer_discount=default_cust_disc,
+                mechanic_discount=default_mech_disc,
                 barcode=barcode,
+                is_confirmed=False,  # Bulk Excel uploads start in Unconfirmed Staging
             )
 
             self.db.add(new_part)
-            await self.db.flush()  # Populates new_part.id
+            await self.db.flush()
 
-            # If opening stock > 0, log opening audit trail entry
+            # Record Opening Stock Movement
             if quantity > 0:
                 movement = StockMovement(
                     spare_part_id=new_part.id,
@@ -194,11 +343,13 @@ class ImportService:
                 batch_barcodes.add(barcode)
             imported_count += 1
 
-        # Commit all successfully validated parts
+        # Commit all parts and stock movements atomically
         await self.db.commit()
 
         return ImportSummaryResponse(
             filename=file.filename or "uploaded.xlsx",
+            supplier_id=supplier_id,
+            supplier_name=supplier_name,
             total_rows_processed=total_rows,
             imported_count=imported_count,
             skipped_count=skipped_count,

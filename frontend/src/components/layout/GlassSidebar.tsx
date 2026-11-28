@@ -1,9 +1,12 @@
 import React from "react";
 import { NavigationSection } from "@/types";
+import { UserProfile } from "@/api";
 import {
   LayoutDashboard,
+  Search,
   Package,
   ReceiptText,
+  Wallet,
   Store,
   Wrench,
   BadgeIndianRupee,
@@ -12,6 +15,7 @@ import {
   X,
   ChevronRight,
   ShieldCheck,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/utils/cn";
 
@@ -20,12 +24,16 @@ interface GlassSidebarProps {
   onSelectSection: (section: NavigationSection) => void;
   isOpen: boolean;
   onClose: () => void;
+  currentUser?: UserProfile | null;
+  onLogout?: () => void;
 }
 
 const NAV_ITEMS: { label: NavigationSection; icon: typeof LayoutDashboard; badge?: string }[] = [
   { label: "Dashboard", icon: LayoutDashboard },
+  { label: "Search", icon: Search, badge: "Fast" },
   { label: "Inventory", icon: Package, badge: "1.2k" },
   { label: "Billing", icon: ReceiptText, badge: "POS" },
+  { label: "Expenses", icon: Wallet, badge: "Daily" },
   { label: "Suppliers", icon: Store },
   { label: "Mechanics", icon: Wrench },
   { label: "Reports", icon: BadgeIndianRupee },
@@ -37,6 +45,8 @@ export default function GlassSidebar({
   onSelectSection,
   isOpen,
   onClose,
+  currentUser,
+  onLogout,
 }: GlassSidebarProps) {
   return (
     <>
@@ -137,26 +147,36 @@ export default function GlassSidebar({
           })}
         </nav>
 
-        {/* User / Counter Operator Badge */}
-        <div className="p-3 border-t border-white/10">
+        {/* User / Counter Operator Badge & Logout */}
+        <div className="p-3 border-t border-white/10 space-y-2">
           <div className="glass-card rounded-2xl p-3 flex items-center gap-3">
             <div className="relative">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 text-xs font-bold text-white shadow-[0_0_12px_rgba(56,189,248,0.3)]">
-                AS
+                {currentUser?.full_name ? currentUser.full_name.substring(0, 2).toUpperCase() : "CS"}
               </div>
               <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-slate-900" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="truncate text-xs font-bold text-white flex items-center gap-1">
-                Arun Sharma
+                {currentUser?.full_name || currentUser?.username || "Counter Staff"}
                 <ShieldCheck size={12} className="text-sky-400 shrink-0" />
               </div>
               <div className="truncate text-[10px] text-slate-400 font-mono">
-                Counter Admin (POS-1)
+                {currentUser?.role || "COUNTER_STAFF"}
               </div>
             </div>
-            <ChevronRight className="text-slate-400 shrink-0" size={14} />
           </div>
+
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/25 text-xs font-semibold transition-all cursor-pointer"
+              title="Sign out of current cashier/admin session"
+            >
+              <LogOut size={13} />
+              <span>Log Out</span>
+            </button>
+          )}
         </div>
       </aside>
     </>

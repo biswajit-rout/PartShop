@@ -1,10 +1,10 @@
+"use client";
+
 import React, { useState, useEffect } from "react";
 import { NavigationSection, SparePart } from "@/types";
-import {
-  salesTrend,
-  brandDistribution,
-} from "@/data/mock-data";
+import { salesTrend, brandDistribution } from "@/data/mock-data";
 import { formatRupees, formatDate } from "@/utils/formatters";
+import { reportsApi, DailySalesSummary, TopSellingPart, WeeklyTrendPoint } from "@/api";
 import PageHeading from "@/components/common/PageHeading";
 import GlassKPICard from "@/components/ui/glass/GlassKPICard";
 import GlassBadge from "@/components/ui/glass/GlassBadge";
@@ -14,11 +14,12 @@ import {
   IndianRupee,
   Package,
   AlertTriangle,
-  Wrench,
+  Receipt,
   TrendingUp,
   Barcode,
   ArrowUpRight,
   Boxes,
+  Percent,
 } from "lucide-react";
 import {
   AreaChart,
@@ -42,15 +43,56 @@ export default function DashboardView({
   products,
   onNavigate,
 }: DashboardViewProps) {
+  const [currentDateStr, setCurrentDateStr] = useState("Live POS Session");
+  const [dailySales, setDailySales] = useState<DailySalesSummary | null>(null);
+  const [topParts, setTopParts] = useState<TopSellingPart[]>([]);
+  const [weeklyTrend, setWeeklyTrend] = useState<WeeklyTrendPoint[]>([]);
+
+  // Real inventory computations from live products
   const lowStockCount = products.filter(
     (p) => p.status === "Low Stock" || p.status === "Out of Stock"
   ).length;
 
-  const [currentDateStr, setCurrentDateStr] = useState("Live POS Session");
+  const totalInventoryValuation = products.reduce(
+    (acc, p) => acc + ((p.purchasePrice || p.sellingPrice || 0) * (p.quantity || 0)),
+    0
+  );
+
+  const totalInventoryUnits = products.reduce((acc, p) => acc + (p.quantity || 0), 0);
 
   useEffect(() => {
     setCurrentDateStr(formatDate(new Date()));
-  }, []);
+
+    // Load real metrics from FastAPI
+    async function loadAnalytics() {
+      try {
+        const sales = await reportsApi.getDailySales();
+        setDailySales(sales);
+      } catch (err) {
+        console.warn("FastAPI reports unreachable yet:", err);
+      }
+
+      try {
+        const top = await reportsApi.getTopSelling(4);
+        if (top && top.length > 0) {
+          setTopParts(top);
+        }
+      } catch (err) {
+        console.warn("FastAPI top selling items unreachable:", err);
+      }
+
+      try {
+        const trend = await reportsApi.getWeeklyTrend();
+        if (trend && trend.length > 0) {
+          setWeeklyTrend(trend);
+        }
+      } catch (err) {
+        console.warn("FastAPI weekly trend unreachable:", err);
+      }
+    }
+
+    loadAnalytics();
+  }, [products]);
 
   return (
     <div className="space-y-6">
@@ -73,34 +115,34 @@ export default function DashboardView({
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-5">
         <GlassKPICard
           title="Today's Sales"
-          value="₹46,280"
-          subtitle="18 bills generated today"
-          trend={{ value: "+14.2%", isPositive: true }}
+          value={dailySales ? formatRupees(Number(dailySales.grand_total)) : "₹0"}
+          subtitle={dailySales ? `${dailySales.total_invoices} bills generated today` : "No bills settled yet"}
+          trend={{ value: "+ Live", isPositive: true }}
           icon={<IndianRupee className="w-5 h-5" />}
           glowColor="sky"
         />
         <GlassKPICard
           title="Total Inventory Value"
-          value="₹18,45,200"
-          subtitle="2,480 total spare parts"
-          trend={{ value: "+3.8%", isPositive: true }}
+          value={formatRupees(totalInventoryValuation)}
+          subtitle={`${totalInventoryUnits.toLocaleString()} units · ${products.length} cataloged SKUs`}
+          trend={{ value: "Stock On Shelf", isPositive: true }}
           icon={<Boxes className="w-5 h-5" />}
           glowColor="emerald"
         />
         <GlassKPICard
           title="Low Stock Items"
           value={`${lowStockCount} Parts`}
-          subtitle="Below safe reorder buffer"
-          trend={{ value: "Urgent", isPositive: false }}
+          subtitle="At or below reorder buffer"
+          trend={{ value: lowStockCount > 0 ? "Action Required" : "Safe", isPositive: lowStockCount === 0 }}
           icon={<AlertTriangle className="w-5 h-5" />}
           glowColor="amber"
         />
         <GlassKPICard
-          title="Mechanic Commission"
-          value="₹3,420"
-          subtitle="Accrued commission today"
-          trend={{ value: "3 Garages", isPositive: true }}
-          icon={<Wrench className="w-5 h-5" />}
+          title="GST Collected (18%)"
+          value={dailySales ? formatRupees(Number(dailySales.total_tax)) : "₹0"}
+          subtitle="Tax liability tracked today"
+          trend={{ value: "GST Compliant", isPositive: true }}
+          icon={<Receipt className="w-5 h-5" />}
           glowColor="purple"
         />
       </div>
@@ -118,16 +160,16 @@ export default function DashboardView({
                 </h2>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Revenue vs inventory restocking expenditures
+                Financial cash flow: Counter Revenue vs Wholesale Parts Inflow
               </p>
             </div>
-            <div className="flex items-center gap-3 text-xs font-mono">
-              <span className="flex items-center gap-1.5 text-sky-400">
+            <div className="flex items-center gap-3 font-mono text-xs">
+              <span className="flex items-center gap-1.5 text-sky-400 font-semibold">
                 <span className="w-2.5 h-2.5 rounded-full bg-sky-400 shadow-[0_0_8px_#38bdf8]" />
-                Sales
+                Counter Sales
               </span>
-              <span className="flex items-center gap-1.5 text-amber-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_#fbbf24]" />
+              <span className="flex items-center gap-1.5 text-purple-400 font-semibold">
+                <span className="w-2.5 h-2.5 rounded-full bg-purple-400 shadow-[0_0_8px_#c084fc]" />
                 Purchases
               </span>
             </div>
@@ -136,34 +178,36 @@ export default function DashboardView({
           <div className="h-[270px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
-                data={salesTrend}
-                margin={{ left: -10, right: 10, top: 10, bottom: 0 }}
+                data={weeklyTrend.length > 0 ? weeklyTrend : salesTrend}
+                margin={{ top: 10, right: 10, left: -15, bottom: 0 }}
               >
                 <defs>
-                  <linearGradient id="liquidSalesGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.35} />
+                  <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.4} />
                     <stop offset="95%" stopColor="#38bdf8" stopOpacity={0.0} />
                   </linearGradient>
-                  <linearGradient id="liquidPurchGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.0} />
+                  <linearGradient id="purchGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#c084fc" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#c084fc" stopOpacity={0.0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid
                   strokeDasharray="3 3"
-                  vertical={false}
                   stroke="rgba(255,255,255,0.06)"
                 />
                 <XAxis
                   dataKey="day"
-                  axisLine={false}
+                  stroke="#64748b"
+                  fontSize={11}
                   tickLine={false}
-                  tick={{ fill: "#94a3b8", fontSize: 12, fontFamily: "monospace" }}
+                  axisLine={{ stroke: "rgba(255,255,255,0.1)" }}
+                  dy={8}
                 />
                 <YAxis
-                  axisLine={false}
+                  stroke="#64748b"
+                  fontSize={11}
                   tickLine={false}
-                  tick={{ fill: "#94a3b8", fontSize: 11, fontFamily: "monospace" }}
+                  axisLine={{ stroke: "rgba(255,255,255,0.1)" }}
                   tickFormatter={(val) => `₹${val / 1000}k`}
                 />
                 <Tooltip
@@ -171,58 +215,69 @@ export default function DashboardView({
                     backgroundColor: "rgba(15, 23, 42, 0.9)",
                     backdropFilter: "blur(12px)",
                     borderColor: "rgba(255, 255, 255, 0.15)",
-                    borderRadius: "14px",
+                    borderRadius: "16px",
                     boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
-                    color: "#ffffff",
                     fontSize: "12px",
+                    fontFamily: "monospace",
                   }}
-                  formatter={(value) => [formatRupees(Number(value)), ""]}
+                  formatter={(value: any) => [
+                    formatRupees(Number(value) || 0),
+                    "",
+                  ]}
                 />
                 <Area
                   type="monotone"
                   dataKey="sales"
-                  name="Sales"
                   stroke="#38bdf8"
                   strokeWidth={2.5}
-                  fill="url(#liquidSalesGrad)"
+                  fillOpacity={1}
+                  fill="url(#salesGrad)"
+                  name="Sales"
                 />
                 <Area
                   type="monotone"
                   dataKey="purchase"
-                  name="Purchase"
-                  stroke="#f59e0b"
+                  stroke="#c084fc"
                   strokeWidth={2}
-                  fill="url(#liquidPurchGrad)"
+                  fillOpacity={1}
+                  fill="url(#purchGrad)"
+                  name="Purchases"
                 />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </GlassCard>
 
-        {/* Brand Distribution Glass Pie Chart */}
+        {/* Brand Distribution Donut Chart */}
         <GlassCard className="flex flex-col justify-between">
-          <div className="border-b border-white/10 pb-3 mb-2">
+          <div className="border-b border-white/10 pb-4 mb-2">
             <h2 className="text-base font-bold text-white tracking-wide">
-              Sales by Brand
+              Brand Market Share
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Market share in current month
+              Top brands by catalog volume
             </p>
           </div>
 
-          <div className="h-[185px] w-full flex items-center justify-center">
+          <div className="h-[200px] w-full relative flex items-center justify-center">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
                   data={brandDistribution}
-                  dataKey="value"
-                  innerRadius={52}
-                  outerRadius={76}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={55}
+                  outerRadius={80}
                   paddingAngle={4}
-                  stroke="none"
+                  dataKey="value"
                 >
-                  {brandDistribution.map((entry) => (
-                    <Cell key={entry.name} fill={entry.color} />
+                  {brandDistribution.map((entry, index) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={entry.color}
+                      stroke="rgba(15, 23, 42, 0.6)"
+                      strokeWidth={2}
+                    />
                   ))}
                 </Pie>
                 <Tooltip
@@ -231,21 +286,26 @@ export default function DashboardView({
                     backdropFilter: "blur(12px)",
                     borderColor: "rgba(255, 255, 255, 0.15)",
                     borderRadius: "12px",
-                    color: "#ffffff",
-                    fontSize: "12px",
+                    fontSize: "11px",
+                    fontFamily: "monospace",
                   }}
-                  formatter={(value) => [`${value}% Share`, "Brand"]}
+                  formatter={(val) => [`${val}%`, "Share"]}
                 />
               </PieChart>
             </ResponsiveContainer>
+            <div className="absolute text-center pointer-events-none">
+              <span className="text-xl font-bold font-mono text-white block">
+                7 Brands
+              </span>
+              <span className="text-[10px] text-slate-400 uppercase tracking-widest font-mono">
+                OEM Stock
+              </span>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/10">
-            {brandDistribution.map((brand) => (
-              <div
-                key={brand.name}
-                className="flex items-center text-xs text-slate-300 font-mono px-2 py-1 rounded-lg bg-white/5"
-              >
+          <div className="grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-300 pt-2 border-t border-white/10">
+            {brandDistribution.slice(0, 4).map((brand) => (
+              <div key={brand.name} className="flex items-center">
                 <span
                   className="w-2.5 h-2.5 rounded-full mr-2 shrink-0 shadow-[0_0_8px_currentColor]"
                   style={{ backgroundColor: brand.color, color: brand.color }}
@@ -269,7 +329,7 @@ export default function DashboardView({
                 Critical Inventory & Restock Alerts
               </h2>
               <p className="text-xs text-slate-400">
-                Parts requiring purchase orders to avoid stockout
+                Parts requiring purchase orders to avoid counter stockouts
               </p>
             </div>
             <button
@@ -295,9 +355,10 @@ export default function DashboardView({
               <tbody className="divide-y divide-white/5 font-mono">
                 {products
                   .filter((p) => p.status !== "In Stock")
+                  .slice(0, 5)
                   .map((item) => (
                     <tr
-                      key={item.partNumber}
+                      key={item.id}
                       className="hover:bg-white/[0.04] transition-colors"
                     >
                       <td className="py-3 px-3">
@@ -346,42 +407,45 @@ export default function DashboardView({
               Top Fast-Moving Spares
             </h2>
             <p className="text-xs text-slate-400">
-              Highest turnover counter items this month
+              Highest turnover counter items from live billing
             </p>
           </div>
 
           <div className="space-y-3">
-            {[
-              { name: "Brake Shoe - Activa", brand: "Honda", sold: 86, tag: "#1 Fast Mover" },
-              { name: "Engine Oil Activ 4T 1L", brand: "Castrol", sold: 74, tag: "High Margin" },
-              { name: "Clutch Cable Assembly", brand: "TVS", sold: 58, tag: "Commuter" },
-              { name: "Heavy Duty Chain Sprocket", brand: "Rollon", sold: 42, tag: "Premium" },
-            ].map((prod, idx) => (
-              <div
-                key={prod.name}
-                className="glass-card rounded-xl p-3 flex items-center justify-between"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-sky-500/15 border border-sky-400/25 flex items-center justify-center font-mono font-bold text-sky-400 text-xs">
-                    0{idx + 1}
+            {topParts.length > 0 ? (
+              topParts.map((prod, idx) => (
+                <div
+                  key={prod.spare_part_id}
+                  className="glass-card rounded-xl p-3 flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-sky-500/15 border border-sky-400/25 flex items-center justify-center font-mono font-bold text-sky-400 text-xs">
+                      0{idx + 1}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white">
+                        {prod.item_name}
+                      </div>
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        {prod.brand_name} · {prod.part_number}
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-xs font-bold text-white">
-                      {prod.name}
+                  <div className="text-right">
+                    <div className="text-xs font-bold text-emerald-400 font-mono">
+                      {prod.units_sold} sold
                     </div>
                     <div className="text-[10px] text-slate-400 font-mono">
-                      {prod.brand} · {prod.tag}
+                      {formatRupees(Number(prod.total_revenue))}
                     </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-xs font-bold text-white font-mono">
-                    {prod.sold}
-                  </div>
-                  <div className="text-[10px] text-slate-400">units sold</div>
-                </div>
+              ))
+            ) : (
+              <div className="text-center py-8 text-xs text-slate-400 font-mono">
+                No parts sold yet today. Check out items at the counter to populate velocity!
               </div>
-            ))}
+            )}
           </div>
         </div>
       </div>

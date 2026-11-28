@@ -3,7 +3,7 @@
 > **Document Purpose**: Complete HTTP API specifications, request/response contracts, validation rules, and authentication schemas.  
 > **Source of Truth**: Active Codebase (`d:/Programming/PartShop`)  
 > **Governance**: Maintained according to rules established in `AGENTS.md`.  
-> **Last Updated**: 2026-11-23  
+> **Last Updated**: 2026-11-26  
 
 ---
 
@@ -132,6 +132,9 @@ Adds a new item to the shop inventory with pricing and barcode.
     "selling_price": 450.00,
     "customer_discount": 5.00,
     "mechanic_discount": 12.00,
+    "supplier_id": 2,
+    "supplier_name": "Om Sai Auto Spares Wholesaler",
+    "supplier_discount": 18.00,
     "barcode": "8901234567890"
   }
   ```
@@ -143,41 +146,43 @@ Adds a new item to the shop inventory with pricing and barcode.
 ---
 
 ### 3.2 Search & List Spare Parts
-Fast paginated catalog search by item name, part number, compatible motorcycle model, or brand.
+Fast paginated catalog search by item name, part number, compatible motorcycle model, brand, or barcode. Uses an intelligent tokenized search engine with automotive abbreviations/synonym expansion (`filter`/`filt`, `brake`/`brk`/`pad`/`shoe`, `cushion`/`shock`/`damper`, `clutch`/`clt`, etc.).
 
 - **Method**: `GET`
-- **Route**: `/api/v1/parts/`
+- **Route**: `/api/v1/parts/` or `/api/v1/parts`
 - **Authentication**: `Bearer <JWT_TOKEN>`
 - **Query Parameters**:
-  - `q` (string, optional): Full-text search term across item name, part number, and bike model.
-  - `brand` (string, optional): Filter by brand (e.g. `Hero`, `Bajaj`).
+  - `q` (string, optional): Multi-token search query across all part attributes (e.g., `"Bajaj pulsar Air filter"`, `"Activa brake"`, `"Splendor clutch"`). Splits into whitespace-separated tokens and requires all tokens to be satisfied across any part field with synonym expansion.
+  - `brand` (string, optional): Filter by brand (e.g. `Hero`, `Bajaj`, `Honda`).
   - `low_stock_only` (boolean, optional, default: `false`): Filter items where `quantity <= min_stock_alert`.
+  - `is_confirmed` (boolean, optional): Filter by confirmation status (`true` for confirmed catalog, `false` for unconfirmed staging queue).
+  - `is_deleted` (boolean, optional, default: `false`): Filter by soft-deletion status (`false` for active/confirmed parts, `true` for Recycle Bin items).
   - `skip` (integer, default: `0`): Pagination offset.
-  - `limit` (integer, default: `50`, max: `100`): Page size.
+  - `limit` (integer, default: `50`, max: `500`): Page size.
 - **Response (`200 OK`)**:
   ```json
   {
-    "total": 1,
+    "total": 2,
     "skip": 0,
     "limit": 50,
     "items": [
       {
-        "id": 1,
-        "item_name": "Front Disc Brake Pad",
-        "brand_name": "Bosch",
-        "part_number": "BP-4029-FR",
-        "model_number": "Pulsar 220 / Apache RTR",
-        "compatible_bikes": "Bajaj Pulsar 220, TVS Apache RTR 160/180",
-        "quantity": 25,
+        "id": 65,
+        "item_name": "KIT ELEMENT AIR FILT/81",
+        "brand_name": "OEM Genuine",
+        "part_number": "36DK0015",
+        "model_number": null,
+        "compatible_bikes": "Bajaj Pulsar 150",
+        "quantity": 1,
         "min_stock_alert": 5,
-        "rack_number": "Rack-B3",
-        "purchase_price": "280.00",
-        "selling_price": "450.00",
-        "customer_discount": "5.00",
-        "mechanic_discount": "12.00",
-        "barcode": "8901234567890",
-        "created_at": "2026-11-23T18:00:00Z",
-        "updated_at": "2026-11-23T18:00:00Z"
+        "rack_number": null,
+        "purchase_price": "430.11",
+        "selling_price": "531.00",
+        "customer_discount": "0.00",
+        "mechanic_discount": "0.00",
+        "barcode": null,
+        "created_at": "2026-11-25T20:10:43.158105Z",
+        "updated_at": "2026-11-25T20:10:43.158116Z"
       }
     ]
   }
@@ -194,6 +199,167 @@ Instant `< 5ms` query by barcode scanned at POS counter.
 - **Response (`200 OK`)**: Single `SparePartResponse` object.
 - **Error Codes**:
   - `404 Not Found`: No item matching scanned barcode.
+
+---
+
+### 3.4 Update Spare Part Details & Stock Pricing
+Updates existing spare part attributes, price tiers, physical stock level, rack location, or barcode. Manual quantity adjustments automatically record an immutable `ADJUSTMENT` entry in the `stock_movements` ledger.
+
+- **Method**: `PUT`
+- **Route**: `/api/v1/parts/{part_id}`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SparePartUpdate`)**:
+  ```json
+  {
+    "item_name": "Front Disc Brake Pad (Updated)",
+    "selling_price": "475.00",
+    "quantity": 25,
+    "rack_number": "Rack-A3"
+  }
+  ```
+- **Response (`200 OK`)**: Updated `SparePartResponse` object.
+
+---
+
+### 3.5 Fast Goods Inward / Restock Spare Part
+Quickly restocks an existing spare part from shipment delivery or inward scan: increments current quantity on hand, optionally updates acquisition purchase cost or rack locator, and logs an immutable `PURCHASE_IN` entry in the `stock_movements` audit ledger.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/parts/{part_id}/restock`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SparePartRestock`)**:
+  ```json
+  {
+    "quantity_to_add": 10,
+    "purchase_price": 210.00,
+    "rack_number": "Rack-B04"
+  }
+  ```
+- **Validation Rules**:
+  - `quantity_to_add`: Integer greater than 0 (`HTTP 400` if <= 0).
+  - `purchase_price`: Optional updated purchase cost.
+  - `rack_number`: Optional updated shelf locator string.
+- **Response (`200 OK`)**: Updated `SparePartResponse` object with incremented `quantity`.
+- **Error Codes**:
+  - `404 Not Found`: Spare part with ID not found.
+  - `400 Bad Request`: Invalid quantity to add, or attempt to restock an unconfirmed (`is_confirmed = False`) or deleted (`is_deleted = True`) part.
+
+---
+
+### 3.6 Batch Confirm Spare Parts
+Multi-select confirm unconfirmed or staging spare parts (e.g. newly imported from bulk Excel workbooks). Transitions parts to `is_confirmed = True`, making them instantly active for POS counter sales.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/parts/confirm-batch`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SparePartBatchConfirmRequest`)**:
+  ```json
+  {
+    "part_ids": [101, 102, 105, 108]
+  }
+  ```
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "confirmed_count": 4,
+    "part_ids": [101, 102, 105, 108],
+    "message": "Successfully confirmed 4 spare part(s)."
+  }
+  ```
+- **Error Codes**:
+  - `401 Unauthorized`: Missing or invalid credentials.
+
+---
+
+### 3.7 Single Part Confirm & Rack Location Assignment
+Validates and confirms an individual spare part, optionally updating or assigning its warehouse shelf/rack locator at the same time.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/parts/{part_id}/confirm`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SparePartSingleConfirmRequest`, Optional)**:
+  ```json
+  {
+    "rack_number": "RACK-A02"
+  }
+  ```
+- **Response (`200 OK`)**: Updated `SparePartResponse` object with `is_confirmed: true` and updated `rack_number`.
+- **Error Codes**:
+  - `404 Not Found`: Part ID not found.
+
+---
+
+### 3.8 Soft Delete Spare Part
+Moves an individual spare part to the Recycle Bin (`is_deleted = True`, `deleted_at = NOW()`). The part is preserved in the database to maintain foreign key integrity for past sales and invoice line items, but is removed from active counter sales and searches.
+
+- **Method**: `DELETE`
+- **Route**: `/api/v1/parts/{part_id}`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Response (`204 No Content`)**: Empty response body on successful soft-deletion.
+- **Error Codes**:
+  - `404 Not Found`: Part ID not found or already deleted.
+
+---
+
+### 3.9 Batch Soft Delete Spare Parts
+Multi-select soft delete multiple spare parts in a single atomic request (e.g., removing erroneous bulk uploads).
+
+- **Method**: `POST`
+- **Route**: `/api/v1/parts/delete-batch`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SparePartBatchDeleteRequest`)**:
+  ```json
+  {
+    "part_ids": [101, 102, 105]
+  }
+  ```
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "deleted_count": 3,
+    "part_ids": [101, 102, 105],
+    "message": "Successfully moved 3 spare part(s) to Recycle Bin."
+  }
+  ```
+- **Error Codes**:
+  - `401 Unauthorized`: Missing or invalid credentials.
+
+---
+
+### 3.10 Restore Soft-Deleted Spare Part
+Restores a spare part from the Recycle Bin back to active inventory (`is_deleted = False`, `deleted_at = null`).
+
+- **Method**: `POST`
+- **Route**: `/api/v1/parts/{part_id}/restore`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Response (`200 OK`)**: Restored `SparePartResponse` object with `is_deleted: false`.
+- **Error Codes**:
+  - `404 Not Found`: Part ID not found in database.
+
+---
+
+### 3.11 Batch Restore Spare Parts
+Multi-select restore multiple soft-deleted spare parts from the Recycle Bin back to active inventory.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/parts/restore-batch`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SparePartBatchRestoreRequest`)**:
+  ```json
+  {
+    "part_ids": [101, 102, 105]
+  }
+  ```
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "restored_count": 3,
+    "part_ids": [101, 102, 105],
+    "message": "Successfully restored 3 spare part(s) from Recycle Bin."
+  }
+  ```
+- **Error Codes**:
+  - `401 Unauthorized`: Missing or invalid credentials.
 
 ---
 
@@ -273,6 +439,90 @@ Fetches complete invoice details, tax breakdown, and all line items for display 
 
 ---
 
+### 4.3 List Past Invoices
+Retrieves a paginated list of all customer sales invoices sorted descending by creation time, with optional search term filtering, date range filtering, and status filtering.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/billing/invoices`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Query Parameters**:
+  - `skip` (integer, optional, default: `0`): Pagination offset.
+  - `limit` (integer, optional, default: `50`): Maximum records to return.
+  - `search` (string, optional): Search term matching invoice number, customer name, or customer phone.
+  - `start_date` (date string `YYYY-MM-DD`, optional): Filter invoices created on or after this date.
+  - `end_date` (date string `YYYY-MM-DD`, optional): Filter invoices created on or before this date.
+  - `status` (string, optional): One of `COMPLETED`, `VOIDED`.
+- **Response (`200 OK`)**: Array of `InvoiceResponse` objects.
+- **Error Codes**:
+  - `401 Unauthorized`: Missing or invalid JWT token.
+
+---
+
+### 4.4 Modify Past Invoice Header Details
+Allows store managers and counter staff to correct errors on an existing invoice header (such as spelling errors in customer name, incorrect phone number, or updating the payment channel) without disturbing inventory stock audit ledgers. Voided/cancelled invoices cannot be modified.
+
+- **Method**: `PUT`
+- **Route**: `/api/v1/billing/invoices/{invoice_id}`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Path Parameters**:
+  - `invoice_id` (integer, required): Unique identifier of the invoice.
+- **Request Body (`InvoiceUpdateRequest`)**:
+  ```json
+  {
+    "customer_name": "Ramesh Kumar Gupta",
+    "customer_phone": "9876543210",
+    "payment_method": "UPI",
+    "items": [
+      {
+        "spare_part_id": 76,
+        "quantity": 2,
+        "discount_percent": 5.0
+      }
+    ]
+  }
+  ```
+- **Validation & Inventory Rules**:
+  - All fields are optional.
+  - `payment_method`: One of `CASH`, `CARD`, `UPI`, `CREDIT`.
+  - `items`: If provided, must contain at least 1 item.
+  - Automatically compares new item quantities against existing invoice items:
+    - **Quantity increased / New item added**: Locks part row under `SELECT ... FOR UPDATE`, checks stock sufficiency, decrements inventory, and logs `StockMovementType.SALE_OUT` (`reference_type="SALE_EDIT"`).
+    - **Quantity reduced / Item removed**: Locks part row under `SELECT ... FOR UPDATE`, increments inventory, and logs `StockMovementType.RETURN_IN` (`reference_type="SALE_EDIT"`).
+  - Dynamically recalculates subtotal, discounts, 18% GST tax, grand total, and mechanic commission rates.
+- **Response (`200 OK`)**: Updated `InvoiceResponse` object with refreshed line items, tax, and totals.
+- **Error Codes**:
+  - `400 Bad Request`: Cannot modify voided invoices, empty items array, or insufficient inventory stock.
+  - `404 Not Found`: Invoice ID or spare part ID not found.
+  - `401 Unauthorized`: Missing or invalid JWT token.
+
+---
+
+### 4.5 Void / Cancel Invoice (Customer Item Return)
+Voids an existing counter invoice and handles customer returns:
+- Automatically restores physical inventory stock quantities under database row locks (`SELECT ... FOR UPDATE`).
+- Records immutable `RETURN_IN` audit ledger entries in `stock_movements` linked to the invoice ID.
+- Sets invoice status to `VOIDED` with an optional cancellation reason and audit timestamp.
+- Excludes voided invoice totals from today's sales, daily profit, rolling weekly trend, and mechanic commission calculations.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/billing/invoices/{invoice_id}/cancel`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Path Parameters**:
+  - `invoice_id` (integer, required): Unique identifier of the invoice to void.
+- **Request Body (`InvoiceCancelRequest`)**:
+  ```json
+  {
+    "reason": "Customer returned defective clutch cable"
+  }
+  ```
+- **Response (`200 OK`)**: Updated `InvoiceResponse` object with `status: "VOIDED"`.
+- **Error Codes**:
+  - `400 Bad Request`: Invoice is already voided / cancelled.
+  - `404 Not Found`: Invoice ID not found.
+  - `401 Unauthorized`: Missing or invalid JWT token.
+
+---
+
 ## 5. Excel Bulk Imports (`/api/v1/imports`)
 
 ### 5.1 Bulk Import Spare Parts Catalog
@@ -284,28 +534,22 @@ Uploads an Excel (`.xlsx`) catalog file, validates rows, detects and skips dupli
 - **Content-Type**: `multipart/form-data`
 - **Form Parameters**:
   - `file`: Excel file (`.xlsx`) containing spare parts data.
+  - `supplier_id` (optional, integer): ID of wholesale supplier to map imported parts to.
+  - `brand_name` (optional, string): Fallback brand name to apply if spreadsheet rows omit brand.
+  - `default_supplier_discount` (optional, numeric): Fallback purchase discount % (e.g. `14.50`) applied to compute cost from MRP.
 - **Header Columns Expected in Excel**:
-  - Required: `item_name`, `brand_name` (or `brand`), `part_number`, `purchase_price`, `selling_price`
-  - Optional: `model_number`, `compatible_bikes`, `quantity`, `min_stock_alert`, `rack_number`, `customer_discount`, `mechanic_discount`, `barcode`
+  - Required: `item_name`, `brand_name` (or `brand`), `part_number`, `purchase_price`, `selling_price` (or `MRP` with supplier discount)
+  - Optional: `model_number`, `compatible_bikes`, `quantity`, `min_stock_alert`, `rack_number`, `customer_discount`, `mechanic_discount`, `barcode`, `supplier_discount`
 - **Response (`200 OK`)**:
   ```json
   {
-    "filename": "bajaj_pulsar_catalog_nov2026.xlsx",
-    "total_rows_processed": 150,
-    "imported_count": 148,
-    "skipped_count": 2,
-    "errors": [
-      {
-        "row_number": 45,
-        "part_number": "BP-201-FR",
-        "reason": "Part number 'BP-201-FR' already exists in database or spreadsheet."
-      },
-      {
-        "row_number": 82,
-        "part_number": null,
-        "reason": "item_name, brand_name, and part_number cannot be empty."
-      }
-    ]
+    "filename": "honda_activa_spares_nov2026.xlsx",
+    "total_rows_processed": 53,
+    "imported_count": 53,
+    "skipped_count": 0,
+    "supplier_id": 1,
+    "supplier_name": "Kalyani Honda Spares Distributorship",
+    "errors": []
   }
   ```
 - **Error Codes**:
@@ -322,7 +566,7 @@ Retrieves aggregated daily revenue, discount totals, GST tax liability, and sett
 
 - **Method**: `GET`
 - **Route**: `/api/v1/reports/daily-sales`
-- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`)
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
 - **Query Parameters**:
   - `target_date` (string, optional, format: `YYYY-MM-DD`, default: today): Date for the reconciliation report.
 - **Response (`200 OK`)**:
@@ -407,8 +651,476 @@ Retrieves all spare parts whose stock on hand has dropped to or below their conf
       "part_number": "SP-NGK-CPR8",
       "rack_number": "Rack-A2",
       "quantity": 2,
-      "min_stock_alert": 10
+      "min_stock_alert": 5
     }
   ]
   ```
 
+---
+
+### 6.4 Rolling Weekly Sales vs Purchases Trend
+Retrieves a rolling 7-day time series comparing counter sales revenue with inventory purchase inward costs.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/reports/weekly-trend`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Query Parameters**:
+  - `days` (integer, optional, default: `7`, max: `30`): Number of rolling days.
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "day": "Thu",
+      "date": "2026-11-26",
+      "sales": 3541.18,
+      "purchase": 0.0
+    }
+  ]
+  ```
+
+---
+
+## 7. Item Brands Master API (`/api/v1/brands`)
+
+### 7.1 List All Brands
+Retrieves all active spare part brands/manufacturers.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/brands`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "id": 1,
+      "name": "Hero",
+      "code": "HERO",
+      "description": "Hero MotoCorp OEM & Genuine Spares",
+      "default_customer_discount": "5.00",
+      "default_mechanic_discount": "10.00",
+      "created_at": "2026-11-25T19:27:37Z",
+      "updated_at": "2026-11-25T19:27:37Z"
+    }
+  ]
+  ```
+
+### 7.2 Create New Brand
+Registers a new brand/manufacturer.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/brands`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Request Body (`BrandCreate`)**:
+  ```json
+  {
+    "name": "Brembo",
+    "code": "BREM",
+    "description": "High Performance Brake Systems",
+    "default_customer_discount": "5.00",
+    "default_mechanic_discount": "10.00"
+  }
+  ```
+- **Response (`201 Created`)**: `BrandResponse` object.
+
+---
+
+## 8. Mechanics & Commission Matrix API (`/api/v1/mechanics`)
+
+### 8.1 List All Mechanics
+Retrieves all mechanic partners with their default commission and brand-specific override matrix.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/mechanics`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Query Parameters**:
+  - `active_only` (optional, boolean): Filter only active mechanics.
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "id": 1,
+      "name": "Ramesh Sharma",
+      "phone": "+91 98765 43210",
+      "garage_name": "Ramesh Auto Care",
+      "address": "Shop 4, Main Market, Station Road",
+      "default_commission_percentage": "5.00",
+      "is_active": true,
+      "created_at": "2026-11-25T19:27:37Z",
+      "updated_at": "2026-11-25T19:27:37Z",
+      "brand_commissions": [
+        {
+          "id": 1,
+          "mechanic_id": 1,
+          "brand_id": 1,
+          "brand_name": "Hero",
+          "commission_percentage": "8.00"
+        },
+        {
+          "id": 2,
+          "mechanic_id": 1,
+          "brand_id": 2,
+          "brand_name": "Bajaj",
+          "commission_percentage": "10.00"
+        }
+      ]
+    }
+  ]
+  ```
+
+### 8.2 Create Mechanic Partner
+Registers a new mechanic partner with custom brand commission rates.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/mechanics`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Request Body (`MechanicCreate`)**:
+  ```json
+  {
+    "name": "Ramesh Sharma",
+    "phone": "+91 98765 43210",
+    "garage_name": "Ramesh Auto Care",
+    "address": "Shop 4, Station Road",
+    "default_commission_percentage": "5.00",
+    "commissions": [
+      {
+        "brand_id": 1,
+        "commission_percentage": "8.00"
+      }
+    ]
+  }
+  ```
+- **Response (`201 Created`)**: `MechanicResponse` object.
+
+### 8.3 Get Date-Wise Items Taken by Mechanic
+Returns a chronological audit ledger of all spare parts taken or sold by this mechanic, showing invoice #, part details, commission %, and commission payout amount.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/mechanics/{mechanic_id}/items`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Query Parameters**:
+  - `start_date` (optional, date string `YYYY-MM-DD`)
+  - `end_date` (optional, date string `YYYY-MM-DD`)
+  - `skip` (optional, default: 0)
+  - `limit` (optional, default: 100)
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "sale_id": 3,
+      "invoice_number": "INV-20261125-193030-328",
+      "date": "2026-11-25T19:30:30Z",
+      "spare_part_id": 1,
+      "item_name": "Front Disc Brake Pad",
+      "part_number": "BP-101",
+      "brand_name": "Hero",
+      "quantity": 1,
+      "unit_price": "450.00",
+      "total_price": "450.00",
+      "commission_percentage": "8.00",
+      "commission_amount": "36.00",
+      "customer_name": "Rohan Verma",
+      "customer_phone": "9811223344"
+    }
+  ]
+  ```
+
+### 8.4 Get Mechanic Performance Summary
+Calculates aggregate KPI totals: parts count, sales volume, and total commission earned.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/mechanics/{mechanic_id}/summary`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Query Parameters**:
+  - `start_date` (optional, date string `YYYY-MM-DD`)
+  - `end_date` (optional, date string `YYYY-MM-DD`)
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "mechanic_id": 1,
+    "mechanic_name": "Ramesh Sharma",
+    "garage_name": "Ramesh Auto Care",
+    "total_items_taken": 1,
+    "total_sales_volume": "450.00",
+    "total_commission_earned": "36.00"
+  }
+  ```
+
+---
+
+## 9. Wholesale Suppliers Directory (`/api/v1/suppliers`)
+
+### 9.1 List All Suppliers
+Returns all registered wholesale suppliers and distributor partners along with their aggregate mapped inventory parts count.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/suppliers`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Query Parameters**:
+  - `active_only` (optional, boolean, default: `false`): Filter active suppliers only.
+- **Response (`200 OK`)**:
+  ```json
+  [
+    {
+      "id": 1,
+      "name": "Kalyani Honda Spares Distributorship",
+      "contact_person": "Prakash Rout",
+      "phone": "+91 94370 12345",
+      "email": "orders@kalyanihonda.com",
+      "address": "Plot 12, Industrial Estate, Cuttack, Odisha",
+      "gst_number": "21AABCK1234F1Z9",
+      "default_discount_percentage": "14.50",
+      "is_active": true,
+      "total_parts_count": 53,
+      "brand_discounts": [
+        {
+          "id": 1,
+          "supplier_id": 1,
+          "brand_id": 1,
+          "brand_name": "Hero",
+          "discount_percentage": "22.00"
+        },
+        {
+          "id": 2,
+          "supplier_id": 1,
+          "brand_id": 2,
+          "brand_name": "Honda",
+          "discount_percentage": "18.00"
+        }
+      ],
+      "created_at": "2026-11-26T00:00:00Z",
+      "updated_at": "2026-11-26T00:00:00Z"
+    }
+  ]
+  ```
+
+### 9.2 Create Supplier
+Registers a new distributor or wholesale partner with optional brand-specific purchase discount overrides.
+
+- **Method**: `POST`
+- **Route**: `/api/v1/suppliers`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SupplierCreate`)**:
+  ```json
+  {
+    "name": "Om Sai Auto Spares Wholesaler",
+    "contact_person": "Sanjay Mohanty",
+    "phone": "+91 94371 67890",
+    "email": "omsai.spares@gmail.com",
+    "address": "Badambadi Market, Cuttack, Odisha",
+    "gst_number": "21AABCO5678H1Z4",
+    "default_discount_percentage": 15.00,
+    "is_active": true,
+    "brand_discounts": [
+      {
+        "brand_id": 1,
+        "discount_percentage": 22.00
+      },
+      {
+        "brand_id": 2,
+        "discount_percentage": 18.00
+      }
+    ]
+  }
+  ```
+- **Response (`201 Created`)**: Full `SupplierResponse` object with `brand_discounts` and `total_parts_count: 0`.
+
+### 9.3 Get Supplier by ID
+Retrieves details for a single supplier.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/suppliers/{id}`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Response (`200 OK`)**: Full `SupplierResponse` object.
+
+### 9.4 Update Supplier
+Updates supplier contact details, address, GSTIN, or default purchase discount percentage.
+
+- **Method**: `PUT`
+- **Route**: `/api/v1/suppliers/{id}`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`SupplierUpdate`)**: Partial update fields.
+- **Response (`200 OK`)**: Updated `SupplierResponse` object.
+
+### 9.5 Delete Supplier
+Soft-deactivates or deletes a supplier partner.
+
+- **Method**: `DELETE`
+- **Route**: `/api/v1/suppliers/{id}`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`)
+- **Response (`204 No Content`)**
+
+### 9.6 Get Items Supplied by Supplier
+Returns a paginated list of all spare parts mapped to a specific wholesale supplier, including part number, compatible bikes, purchase discount %, purchase cost, MRP, and stock on hand.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/suppliers/{id}/parts`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Query Parameters**:
+  - `skip` (integer, default: `0`)
+  - `limit` (integer, default: `100`, max: `500`)
+- **Response (`200 OK`)**: `PaginatedSpareParts` schema with `total`, `items`, `page`, and `pages`.
+
+---
+
+## 10. Mobile Barcode Scanner & WebSockets Gateway (`/api/v1/scanner`)
+
+### 10.1 Get Host Network Information
+Discovers the host machine's primary local area network (LAN) IP addresses for generating mobile device pairing QR codes. Respects `HOST_LAN_IP` environment variable if configured, and strictly filters out Docker virtual bridge subnets (`172.16.x.x` - `172.31.x.x`) and loopbacks.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/scanner/network-info`
+- **Authentication**: Public
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "primary_ip": "192.168.1.9",
+    "all_ips": [
+      "192.168.1.9"
+    ],
+    "is_docker_container_ip": false,
+    "frontend_port": 3000,
+    "backend_port": 8001,
+    "suggested_scan_url": "http://192.168.1.9:3000/scan"
+  }
+  ```
+
+### 10.2 Scanner WebSocket Bridge
+Bidirectional real-time WebSocket connection bridging the desktop counter terminal and multiple mobile smartphone camera scanners simultaneously. Maintains a live connected devices roster with scan count telemetry.
+
+- **Protocol**: `WebSocket (WS / WSS)`
+- **Route**: `/api/v1/scanner/ws/{session_id}`
+- **Authentication**: Session-token based (`session_id`)
+- **Events & Message Payloads**:
+  1. **Device Connected Event** (Sent by Mobile on open):
+     ```json
+     {
+       "type": "DEVICE_CONNECTED",
+       "device_id": "dev_4k9j2x",
+       "device_type": "mobile",
+       "device_name": "iPhone 15",
+       "session_id": "sess_94a2b1"
+     }
+     ```
+  2. **Roster Updated Event** (Server broadcast upon connection, disconnection, or scan count increment):
+     ```json
+     {
+       "type": "ROSTER_UPDATED",
+       "session_id": "sess_94a2b1",
+       "devices": [
+         {
+           "device_id": "dev_4k9j2x",
+           "device_name": "iPhone 15",
+           "connected_at": 1732626000000,
+           "scan_count": 4
+         }
+       ],
+       "new_device": {
+         "device_id": "dev_4k9j2x",
+         "device_name": "iPhone 15"
+       }
+     }
+     ```
+  3. **Get Roster Query** (Sent by Desktop on open or refresh):
+     ```json
+     {
+       "type": "GET_ROSTER",
+       "session_id": "sess_94a2b1"
+     }
+     ```
+  4. **Barcode Scanned Event** (Sent by Mobile on barcode / QR code detection):
+     ```json
+     {
+       "type": "BARCODE_SCANNED",
+       "barcode": "8901234009083",
+       "session_id": "sess_94a2b1",
+       "device_id": "dev_4k9j2x",
+       "device_name": "iPhone 15",
+       "timestamp": 1732626050000
+     }
+     ```
+  5. **Device Disconnected Event** (Server broadcast when a mobile socket drops):
+     ```json
+     {
+       "type": "DEVICE_DISCONNECTED",
+       "session_id": "sess_94a2b1",
+       "device": {
+         "device_id": "dev_4k9j2x",
+         "device_name": "iPhone 15"
+       }
+     }
+     ```
+  6. **Ping / Pong Keep-Alive** (Client / Server Heartbeat every 15s):
+     - Client: `{"type": "PING"}`
+     - Server: `{"type": "PONG"}`
+
+
+
+
+---
+
+## 11. Shop Operating Expenses API (`/api/v1/expenses`)
+
+### 11.1 Record an Operating Expense
+Logs an operational overhead expense (e.g. tea/refreshments, electricity, shop rent, staff wages).
+
+- **Method**: `POST`
+- **Route**: `/api/v1/expenses`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`, `COUNTER_STAFF`)
+- **Request Body (`ExpenseCreate`)**:
+  ```json
+  {
+    "category": "TEA_REFRESHMENT",
+    "amount": 120.00,
+    "description": "Evening snacks for staff",
+    "expense_date": "2026-11-26"
+  }
+  ```
+- **Validation Rules**:
+  - `category`: One of `RENT`, `ELECTRICITY`, `TEA_REFRESHMENT`, `SALARY_WAGES`, `MAINTENANCE`, `TRANSPORT`, `STATIONERY`, `OTHER`.
+  - `amount`: Number greater than 0.
+  - `description`: Optional text details.
+  - `expense_date`: Valid date string (`YYYY-MM-DD`). Defaults to current date if omitted.
+- **Response (`201 Created`)**: `ExpenseResponse` object.
+
+### 11.2 List Expenses
+Queries logged expenses with date-range filtering and category filtering.
+
+- **Method**: `GET`
+- **Route**: `/api/v1/expenses`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Query Parameters**:
+  - `category` (string, optional): Filter by category enum.
+  - `start_date` (string, optional, `YYYY-MM-DD`): Inclusive start date.
+  - `end_date` (string, optional, `YYYY-MM-DD`): Inclusive end date.
+  - `skip` (integer, default: 0): Pagination offset.
+  - `limit` (integer, default: 100): Maximum records returned.
+- **Response (`200 OK`)**: List of `ExpenseResponse` objects.
+
+### 11.3 Get Daily Expense & Profit Summary
+Aggregates total daily operational expenses, provides category-wise breakdowns, and computes estimated net profit ($\text{Total Counter Sales} - \text{Total Expenses}$).
+
+- **Method**: `GET`
+- **Route**: `/api/v1/expenses/daily-summary`
+- **Authentication**: `Bearer <JWT_TOKEN>`
+- **Query Parameters**:
+  - `target_date` (string, optional, `YYYY-MM-DD`, default: today).
+- **Response (`200 OK`)**:
+  ```json
+  {
+    "date": "2026-11-26",
+    "total_expense": 120.00,
+    "categories": {
+      "TEA_REFRESHMENT": 120.00
+    },
+    "total_sales": 3541.18,
+    "estimated_profit": 3421.18
+  }
+  ```
+
+### 11.4 Delete Expense Record
+Deletes an expense entry by ID.
+
+- **Method**: `DELETE`
+- **Route**: `/api/v1/expenses/{expense_id}`
+- **Authentication**: `Bearer <JWT_TOKEN>` (Role: `ADMIN`, `STORE_MANAGER`)
+- **Response (`204 No Content`)**

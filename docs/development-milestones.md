@@ -23,14 +23,13 @@ flowchart LR
     M3 --> M4["Milestone 4<br/>Parts & Repositories<br/>(Done)"]
     M4 --> M5["Milestone 5<br/>Atomic POS Billing<br/>(Done)"]
     M5 --> M6["Milestone 6<br/>Excel Imports & Reports<br/>(Done)"]
-    M6 --> M7["Milestone 7<br/>Docker & Full Stack<br/>(In Progress)"]
+    M6 --> M7["Milestone 7<br/>Docker & Full Stack<br/>(Done)"]
 
     classDef done fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ecfdf5;
     classDef current fill:#1e1b4b,stroke:#a855f7,stroke-width:2px,color:#cbd5e1;
     classDef pending fill:#0f172a,stroke:#64748b,stroke-width:1px,color:#94a3b8;
 
-    class M0,M1,M2,M3,M4,M5,M6 done;
-    class M7 current;
+    class M0,M1,M2,M3,M4,M5,M6,M7 done;
 ```
 
 ---
@@ -46,7 +45,7 @@ flowchart LR
 | **Milestone 4** | **Clean Architecture & Spare Parts Catalog** | Repository Pattern, Inventory Service, barcode and bike model search. | `Completed` | 2026-11-24 |
 | **Milestone 5** | **Atomic POS Billing Engine** | Row-level locking (`SELECT FOR UPDATE`), stock decrement, GST, and invoices. | `Completed` | 2026-11-25 |
 | **Milestone 6** | **Excel Bulk Imports & Business Reporting** | Import `.xlsx` catalogs, batch validation, daily counter analytics. | `Completed` | 2026-11-25 |
-| **Milestone 7** | **Dockerization & Next.js UI Integration** | Connect Next.js frontend calls to live FastAPI backend in Docker Compose. | `In Progress` | *Active* |
+| **Milestone 7** | **Dockerization & Next.js UI Integration** | Connect Next.js frontend calls to live FastAPI backend in Docker Compose. | `Completed` | 2026-11-25 |
 
 ---
 
@@ -2263,3 +2262,107 @@ api_router.include_router(reports.router)
 ### Milestone 7: Docker Containerization & Next.js Integration
 - **Status**: `In Progress`
 - **Objective**: Connect the Next.js frontend to the live FastAPI backend container running in Docker Compose, configure API reverse proxying, and verify full end-to-end functionality.
+
+#### 1. File Created: `frontend/src/api/client.ts`
+```typescript
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api/v1";
+
+export interface RequestOptions extends RequestInit {
+  params?: Record<string, string | number | boolean | undefined>;
+}
+
+export async function apiClient<T>(
+  endpoint: string,
+  options: RequestOptions = {}
+): Promise<T> {
+  const { params, headers, ...customConfig } = options;
+
+  let url = `${API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+  if (params) {
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        searchParams.append(key, String(value));
+      }
+    });
+    const queryString = searchParams.toString();
+    if (queryString) {
+      url += (url.includes("?") ? "&" : "?") + queryString;
+    }
+  }
+
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("partshop_token") : null;
+
+  const defaultHeaders: HeadersInit = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...headers,
+  };
+
+  const response = await fetch(url, {
+    ...customConfig,
+    headers: defaultHeaders,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    const message =
+      errorBody.detail ||
+      errorBody.message ||
+      `HTTP Error ${response.status}: ${response.statusText}`;
+    throw new Error(message);
+  }
+
+  if (response.status === 204) {
+    return {} as T;
+  }
+
+  return response.json();
+}
+```
+> **Why**: Centralizes HTTP transport logic, base URL configuration, JWT bearer token injection, and error formatting in a single, reusable function.
+
+---
+
+#### 2. Domain Modules Implemented under `frontend/src/api/modules/`
+- **`parts.api.ts`**: Provides `partsApi.getAll(search, brand)`, `partsApi.getByBarcode(barcode)`, and `partsApi.create(part)`. Includes `mapBackendPartToFrontend` adapter for automatic snake_case to camelCase conversion and stock status calculation.
+- **`billing.api.ts`**: Provides `billingApi.checkout(payload)`, `billingApi.getInvoices(options)` with date-range/status filtering, `billingApi.getInvoiceById(id)`, `billingApi.updateInvoice(id, payload)` for customer/payment typo edits, and `billingApi.cancelInvoice(id, reason)` for customer returns and atomic inventory reversal.
+- **`imports.api.ts`**: Provides `importsApi.uploadCatalogExcel(file)` using multipart FormData.
+- **`reports.api.ts`**: Provides `reportsApi.getDailySales(dateStr)`, `reportsApi.getTopSelling(limit)`, and `reportsApi.getLowStock()`.
+
+---
+
+#### 3. File Created: `frontend/src/api/index.ts`
+```typescript
+// Core HTTP Client
+export { apiClient } from "./client";
+export type { RequestOptions } from "./client";
+
+// Modular Domain APIs
+export { partsApi, mapBackendPartToFrontend } from "./modules/parts.api";
+export type { BackendSparePart, PaginatedPartsResponse } from "./modules/parts.api";
+
+export { billingApi } from "./modules/billing.api";
+export type { CheckoutPayload, InvoiceResponse, CartItemPayload, InvoiceItemResponse } from "./modules/billing.api";
+
+export { importsApi } from "./modules/imports.api";
+export type { ImportSummaryResponse, RowErrorDetail } from "./modules/imports.api";
+
+export { reportsApi } from "./modules/reports.api";
+export type { DailySalesSummary, TopSellingPart, LowStockItem, PaymentBreakdown } from "./modules/reports.api";
+```
+> **Why**: Central barrel export pattern enables ergonomic, clean imports across the application (`import { partsApi, billingApi } from "@/api"`).
+
+---
+
+#### 4. File Updated: `frontend/src/app/page.tsx`
+Connected dynamic data loading:
+- Uses `useEffect` and `partsApi.getAll()` on initial mount to fetch live inventory from the PostgreSQL backend.
+- Implements graceful fallback to `initialProducts` mock data if the backend container is offline or starting up.
+
+---
+
+> [!NOTE]
+> Detailed view-by-view frontend integration curriculum, React component code ledger, and zero-mock verification (Milestones F0 through F5) are actively maintained in **[frontend-development-milestones.md](file:///d:/Programming/PartShop/docs/frontend-development-milestones.md)**.

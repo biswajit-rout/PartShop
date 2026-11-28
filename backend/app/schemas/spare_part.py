@@ -10,6 +10,9 @@ class SparePartBase(BaseModel):
     part_number: str
     model_number: str | None = None
     compatible_bikes: str | None = None
+    supplier_id: int | None = None
+    supplier_name: str | None = None
+    supplier_discount: Decimal = Decimal("0.00")
     quantity: int = 0
     min_stock_alert: int = 5
     rack_number: str | None = None
@@ -19,11 +22,15 @@ class SparePartBase(BaseModel):
     mechanic_discount: Decimal = Decimal("0.00")
     barcode: str | None = None
     qr_code: str | None = None
+    is_confirmed: bool = True
+    is_deleted: bool = False
+    deleted_at: datetime | None = None
 
 
 # 2. Schema for Creating a Part (POST)
 class SparePartCreate(SparePartBase):
-    pass
+    is_confirmed: bool | None = None
+    is_deleted: bool | None = None
 
 
 # 3. Schema for Updating a Part (PUT)
@@ -33,6 +40,9 @@ class SparePartUpdate(BaseModel):
     part_number: str | None = None
     model_number: str | None = None
     compatible_bikes: str | None = None
+    supplier_id: int | None = None
+    supplier_name: str | None = None
+    supplier_discount: Decimal | None = None
     quantity: int | None = None
     min_stock_alert: int | None = None
     rack_number: str | None = None
@@ -42,6 +52,8 @@ class SparePartUpdate(BaseModel):
     mechanic_discount: Decimal | None = None
     barcode: str | None = None
     qr_code: str | None = None
+    is_confirmed: bool | None = None
+    is_deleted: bool | None = None
 
 
 # 4. Schema Returned to Frontend (GET)
@@ -59,3 +71,52 @@ class PaginatedSpareParts(BaseModel):
     skip: int
     limit: int
     items: list[SparePartResponse]
+
+
+# 6. Schema for Fast Goods Inward / Restock (POST)
+class SparePartRestock(BaseModel):
+    quantity_to_add: int
+    purchase_price: Decimal | None = None
+    rack_number: str | None = None
+
+
+# 7. Schema for Batch Confirming Unconfirmed Items
+class SparePartBatchConfirmRequest(BaseModel):
+    part_ids: list[int]
+
+
+# 8. Schema for Single Item Confirmation
+class SparePartSingleConfirmRequest(BaseModel):
+    rack_number: str | None = None
+
+
+# 9. Batch Confirmation Response
+class BatchConfirmResponse(BaseModel):
+    confirmed_count: int
+    part_ids: list[int]
+    message: str = ""
+
+
+# 10. Schema for Batch Deleting Items (Soft Delete)
+class SparePartBatchDeleteRequest(BaseModel):
+    part_ids: list[int]
+
+
+class BatchDeleteResponse(BaseModel):
+    deleted_count: int
+    part_ids: list[int]
+    message: str = ""
+
+
+# 11. Schema for Batch Restoring Soft-Deleted Items
+class SparePartBatchRestoreRequest(BaseModel):
+    part_ids: list[int]
+
+
+class BatchRestoreResponse(BaseModel):
+    restored_count: int
+    part_ids: list[int]
+    message: str = ""
+
+
+
